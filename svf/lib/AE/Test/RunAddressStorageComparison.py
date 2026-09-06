@@ -26,6 +26,7 @@ FIELDS = (
     "peak_rss_bytes",
     "analyzed_nodes",
     "semantic_checksum",
+    "storage_observation",
     "return_code",
     "diagnostic",
 )
@@ -114,6 +115,7 @@ def run_once(options, selected, input_path):
 
     nodes = re.search(r"AE_GENERIC_OBSERVATION analyzed_nodes=(\d+)", output)
     checksum = re.search(r"AE_SEMANTIC_CHECKSUM fnv1a64=([0-9a-f]+)", output)
+    storage = re.search(r"^AE_STORAGE_OBSERVATION (.+)$", output, re.MULTILINE)
     lines = output.rstrip().splitlines()
     return {
         "host": platform.node(),
@@ -123,6 +125,7 @@ def run_once(options, selected, input_path):
         "peak_rss_bytes": rss if rss is not None else "",
         "analyzed_nodes": nodes.group(1) if nodes else "",
         "semantic_checksum": checksum.group(1) if checksum else "",
+        "storage_observation": storage.group(1) if storage else "",
         "return_code": process.returncode,
         "diagnostic": lines[-1][-500:] if lines else "",
     }
