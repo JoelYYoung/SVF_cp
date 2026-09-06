@@ -228,6 +228,69 @@ std::uint64_t semanticChecksum(AbstractInterpretation& analysis)
     return hash;
 }
 
+std::string stateShape(const BoxProgramState& state)
+{
+    if (state.isBottom())
+        return "bottom";
+    std::vector<std::string> numerical;
+    for (AD::Variable variable : state.numerical().constrainedVariables())
+        numerical.push_back(state.numerical().bound(variable).toString());
+    std::sort(numerical.begin(), numerical.end());
+
+    std::vector<std::string> addresses;
+    for (AD::Variable variable : state.addresses().nonDefaultVariables())
+    {
+        const AD::AddressSet value = state.addresses().addressSet(variable);
+        const bool containsNull = value.contains(AD::Location::null());
+        addresses.push_back(std::to_string(value.size()) +
+                            (containsNull ? "n" : "x"));
+    }
+    std::sort(addresses.begin(), addresses.end());
+
+    std::string shape;
+    auto append = [&](char kind, const std::vector<std::string>& values) {
+        shape += kind;
+        shape += std::to_string(values.size());
+        shape += ':';
+        for (const std::string& value : values)
+        {
+            shape += std::to_string(value.size());
+            shape += '#';
+            shape += value;
+        }
+    };
+    append('N', numerical);
+    append('A', addresses);
+    return shape;
+}
+
+std::uint64_t semanticShapeChecksum(AbstractInterpretation& analysis)
+{
+    constexpr std::uint64_t offset = 14695981039346656037ULL;
+    constexpr std::uint64_t prime = 1099511628211ULL;
+    std::vector<std::string> shapes;
+    shapes.reserve(analysis.getAnalyzedNodes().size());
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+        shapes.push_back(
+            stateShape(requireBoxState(analysis.getAbstractState(node))));
+    std::sort(shapes.begin(), shapes.end());
+    if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
+        shapes.push_back("scalar:" + stateShape(requireBoxState(*scalar)));
+
+    std::uint64_t hash = offset;
+    for (const std::string& shape : shapes)
+    {
+        for (unsigned char byte : shape)
+        {
+            hash ^= byte;
+            hash *= prime;
+        }
+        hash ^= 0xffU;
+        hash *= prime;
+    }
+    return hash;
+}
+
 void validateVariableIdLayout(const SVFIR& graph)
 {
     SVFIRAdapter adapter(graph);
@@ -383,9 +446,14 @@ int main(int argc, char** argv)
         std::cout << "AE_GENERIC_OBSERVATION analyzed_nodes="
                   << analysis.getAnalyzedNodes().size() << '\n';
         if (std::getenv("SVF_AE_SEMANTIC_CHECKSUM"))
+        {
             std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
                       << std::setw(16) << std::setfill('0')
                       << semanticChecksum(analysis) << std::dec << '\n';
+            std::cout << "AE_SEMANTIC_SHAPE_CHECKSUM fnv1a64=" << std::hex
+                      << std::setw(16) << std::setfill('0')
+                      << semanticShapeChecksum(analysis) << std::dec << '\n';
+        }
         if (std::getenv("SVF_AE_STORAGE_OBSERVATION"))
         {
             const StorageObservations storage = observeStorage(analysis);

@@ -4,9 +4,12 @@
 #include "AE/Core/BoxProgramState.h"
 #include "AE/Core/NumericalDomain.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -435,6 +438,113 @@ void testAddressDomain()
     requireThrows([&] { unknown.joinWith(numerical); },
                   "AbstractDomain accepted a cross-kind lattice operation");
 }
+
+void testAddressDomainDifferential()
+{
+    using ReferenceSet = std::set<std::uint32_t>;
+    using ReferenceDomain = std::map<std::uint32_t, ReferenceSet>;
+    std::uint32_t random = 0x4d595df4U;
+    auto next = [&] {
+        random = random * 1664525U + 1013904223U;
+        return random;
+    };
+    auto makeAddresses = [&](ReferenceSet& reference) {
+        AddressSet value = AddressSet::bottom();
+        const std::uint32_t count = next() % 6;
+        for (std::uint32_t index = 0; index < count; ++index)
+        {
+            const std::uint32_t location = next() % 257;
+            reference.insert(location);
+            value.insert(Location(location));
+        }
+        return value;
+    };
+    auto compare = [&](const AddressDomain& actual,
+                       const ReferenceDomain& reference) {
+        const std::vector<Variable> variables = actual.nonDefaultVariables();
+        require(variables.size() == reference.size(),
+                "Address differential support size mismatch");
+        std::size_t index = 0;
+        for (const auto& [variableId, locations] : reference)
+        {
+            require(variables[index++].id() == variableId,
+                    "Address differential support ordering mismatch");
+            const AddressSet value = actual.addressSet(Variable(variableId));
+            require(!value.isTop() && value.size() == locations.size(),
+                    "Address differential cardinality mismatch");
+            for (std::uint32_t location : locations)
+                require(value.contains(Location(location)),
+                        "Address differential member mismatch");
+        }
+    };
+
+    AddressDomain domains[] = {AddressDomain::top(), AddressDomain::top()};
+    ReferenceDomain references[2];
+    for (std::size_t step = 0; step < 5000; ++step)
+    {
+        const std::size_t target = next() % 2;
+        const std::size_t other = 1 - target;
+        const std::uint32_t variable = 1 + next() % 4096;
+        switch (next() % 5)
+        {
+        case 0:
+        {
+            ReferenceSet locations;
+            AddressSet value = makeAddresses(locations);
+            domains[target].assign(Variable(variable), std::move(value));
+            references[target][variable] = std::move(locations);
+            break;
+        }
+        case 1:
+            domains[target].forget(Variable(variable));
+            references[target].erase(variable);
+            break;
+        case 2:
+            domains[target] = domains[other];
+            references[target] = references[other];
+            break;
+        case 3:
+        {
+            domains[target].joinWith(domains[other]);
+            ReferenceDomain joined;
+            for (const auto& [key, left] : references[target])
+            {
+                const auto found = references[other].find(key);
+                if (found == references[other].end())
+                    continue;
+                ReferenceSet value = left;
+                value.insert(found->second.begin(), found->second.end());
+                joined.emplace(key, std::move(value));
+            }
+            references[target] = std::move(joined);
+            break;
+        }
+        case 4:
+        {
+            domains[target].meetWith(domains[other]);
+            ReferenceDomain met = references[target];
+            for (const auto& [key, right] : references[other])
+            {
+                const auto found = met.find(key);
+                if (found == met.end())
+                {
+                    met.emplace(key, right);
+                    continue;
+                }
+                ReferenceSet intersection;
+                std::set_intersection(
+                    found->second.begin(), found->second.end(), right.begin(),
+                    right.end(), std::inserter(intersection, intersection.end()));
+                found->second = std::move(intersection);
+            }
+            references[target] = std::move(met);
+            break;
+        }
+        }
+        compare(domains[0], references[0]);
+        compare(domains[1], references[1]);
+    }
+}
 } // namespace
 
 int main()
@@ -448,6 +558,7 @@ int main()
         testProgramStateMemoryFacet();
         testLifetimeDomain();
         testAddressDomain();
+        testAddressDomainDifferential();
         std::cout << "SVF AE core domain test: PASS\n";
         return EXIT_SUCCESS;
     }

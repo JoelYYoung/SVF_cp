@@ -26,6 +26,7 @@ FIELDS = (
     "peak_rss_bytes",
     "analyzed_nodes",
     "semantic_checksum",
+    "semantic_shape_checksum",
     "storage_observation",
     "return_code",
     "diagnostic",
@@ -115,6 +116,9 @@ def run_once(options, selected, input_path):
 
     nodes = re.search(r"AE_GENERIC_OBSERVATION analyzed_nodes=(\d+)", output)
     checksum = re.search(r"AE_SEMANTIC_CHECKSUM fnv1a64=([0-9a-f]+)", output)
+    shape_checksum = re.search(
+        r"AE_SEMANTIC_SHAPE_CHECKSUM fnv1a64=([0-9a-f]+)", output
+    )
     storage = re.search(r"^AE_STORAGE_OBSERVATION (.+)$", output, re.MULTILINE)
     lines = output.rstrip().splitlines()
     return {
@@ -125,6 +129,9 @@ def run_once(options, selected, input_path):
         "peak_rss_bytes": rss if rss is not None else "",
         "analyzed_nodes": nodes.group(1) if nodes else "",
         "semantic_checksum": checksum.group(1) if checksum else "",
+        "semantic_shape_checksum": (
+            shape_checksum.group(1) if shape_checksum else ""
+        ),
         "storage_observation": storage.group(1) if storage else "",
         "return_code": process.returncode,
         "diagnostic": lines[-1][-500:] if lines else "",
@@ -177,7 +184,8 @@ def main():
                         f"{result['status']:7s} {result['seconds']}s "
                         f"rss={result['peak_rss_bytes']} "
                         f"nodes={result['analyzed_nodes']} "
-                        f"checksum={result['semantic_checksum']}",
+                        f"checksum={result['semantic_checksum']} "
+                        f"shape={result['semantic_shape_checksum']}",
                         flush=True,
                     )
 
@@ -191,7 +199,7 @@ def main():
                             )
             if options.require_semantic_match:
                 signatures = {
-                    (sample["analyzed_nodes"], sample["semantic_checksum"])
+                    (sample["analyzed_nodes"], sample["semantic_shape_checksum"])
                     for samples in observations.values()
                     for sample in samples
                     if sample["status"] == "pass"
