@@ -26,6 +26,8 @@
 //
 //
 #include "AE/Svfexe/AbsExtAPI.h"
+
+#include <cmath>
 #include "AE/Svfexe/AbstractInterpretation.h"
 #include "SVFIR/SVFIR.h"
 #include "Util/Options.h"
