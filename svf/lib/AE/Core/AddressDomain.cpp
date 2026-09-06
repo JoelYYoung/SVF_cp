@@ -293,10 +293,11 @@ std::vector<Variable> AddressDomain::nonDefaultVariables() const
     }
     for (const ValuePageEntry& entry : pages_)
     {
-        for (const std::optional<Value>& value : entry.page->values)
+        for (std::size_t slot = 0; slot < ValuesPerPage; ++slot)
         {
-            if (value)
-                variables.push_back(value->first);
+            if (entry.page->values[slot])
+                variables.emplace_back(static_cast<std::uint32_t>(
+                    entry.index * ValuesPerPage + slot));
         }
     }
     return variables;
@@ -429,6 +430,13 @@ const AddressDomain& AddressDomain::requireAddress(
     return static_cast<const AddressDomain&>(other);
 }
 
+std::shared_ptr<AddressDomain::SmallValues> AddressDomain::emptySmallValues()
+{
+    static const std::shared_ptr<SmallValues> empty =
+        std::make_shared<SmallValues>();
+    return empty;
+}
+
 const AddressSet* AddressDomain::findValue(Variable variable) const
 {
     if (!paged_)
@@ -448,9 +456,9 @@ const AddressSet* AddressDomain::findValue(Variable variable) const
         });
     if (iterator == pages_.end() || iterator->index != pageIndex)
         return nullptr;
-    const std::optional<Value>& value =
+    const std::optional<AddressSet>& value =
         iterator->page->values[variable.id() % ValuesPerPage];
-    return value && value->first == variable ? &value->second : nullptr;
+    return value ? &*value : nullptr;
 }
 
 void AddressDomain::storeValue(Variable variable, AddressSet addresses)
@@ -472,12 +480,12 @@ void AddressDomain::storeValue(Variable variable, AddressSet addresses)
             promoteToPages();
         return;
     }
-    std::optional<Value>& slot =
+    std::optional<AddressSet>& slot =
         writablePage(variable.id() / ValuesPerPage)
             .values[variable.id() % ValuesPerPage];
     if (!slot)
         ++size_;
-    slot = Value(variable, std::move(addresses));
+    slot = std::move(addresses);
 }
 
 void AddressDomain::eraseValue(Variable variable)
@@ -505,9 +513,9 @@ void AddressDomain::eraseValue(Variable variable)
         return;
     if (iterator->page.use_count() != 1)
         iterator->page = std::make_shared<ValuePage>(*iterator->page);
-    std::optional<Value>& slot =
+    std::optional<AddressSet>& slot =
         iterator->page->values[variable.id() % ValuesPerPage];
-    if (!slot || slot->first != variable)
+    if (!slot)
         return;
     slot.reset();
     --size_;
@@ -522,7 +530,7 @@ void AddressDomain::promoteToPages()
     const SmallValues values = *smallValues_;
     paged_ = true;
     size_ = 0;
-    smallValues_ = std::make_shared<SmallValues>();
+    smallValues_ = emptySmallValues();
     for (const auto& [variable, addresses] : values)
         storeValue(variable, addresses);
 }
@@ -552,7 +560,7 @@ AddressDomain::ValuePage& AddressDomain::writablePage(std::size_t pageIndex)
 bool AddressDomain::pageIsEmpty(const ValuePage& page)
 {
     return std::none_of(page.values.begin(), page.values.end(),
-                        [](const std::optional<Value>& value) {
+                        [](const std::optional<AddressSet>& value) {
                             return value.has_value();
                         });
 }
@@ -562,7 +570,7 @@ void AddressDomain::makeBottom()
     bottom_ = true;
     paged_ = false;
     size_ = 0;
-    smallValues_ = std::make_shared<SmallValues>();
+    smallValues_ = emptySmallValues();
     pages_.clear();
 }
 

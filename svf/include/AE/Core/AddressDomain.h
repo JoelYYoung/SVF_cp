@@ -173,7 +173,7 @@ private:
 
     struct ValuePage
     {
-        std::array<std::optional<Value>, ValuesPerPage> values;
+        std::array<std::optional<AddressSet>, ValuesPerPage> values;
     };
 
     struct ValuePageEntry
@@ -185,7 +185,7 @@ private:
     using ValuePageDirectory = std::vector<ValuePageEntry>;
 
     explicit AddressDomain(bool bottom)
-        : bottom_(bottom), smallValues_(std::make_shared<SmallValues>())
+        : bottom_(bottom), smallValues_(emptySmallValues())
     {
     }
 
@@ -204,6 +204,7 @@ private:
     std::string domainToString() const override;
 
     const AddressDomain& requireAddress(const AbstractDomain& other) const;
+    static std::shared_ptr<SmallValues> emptySmallValues();
     const AddressSet* findValue(Variable variable) const;
     void storeValue(Variable variable, AddressSet addresses);
     void eraseValue(Variable variable);
