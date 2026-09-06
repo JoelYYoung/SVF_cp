@@ -41,6 +41,13 @@ bool FiniteLocationSet::empty() const
     return size_ == 0;
 }
 
+bool FiniteLocationSet::contains(Location location) const
+{
+    if (size_ <= InlineCapacity)
+        return std::find(begin(), end(), location) != end();
+    return std::binary_search(begin(), end(), location);
+}
+
 FiniteLocationSet::const_iterator FiniteLocationSet::begin() const
 {
     return overflow_ ? overflow_->data() : inline_.data();
@@ -128,8 +135,7 @@ bool AddressSet::isSingleton() const
 
 bool AddressSet::contains(Location location) const
 {
-    return top_ || std::binary_search(locations_.begin(), locations_.end(),
-                                      location);
+    return top_ || locations_.contains(location);
 }
 
 bool AddressSet::hasIntersection(const AddressSet& other) const
@@ -143,7 +149,7 @@ bool AddressSet::hasIntersection(const AddressSet& other) const
     if (larger->size() < smaller->size())
         std::swap(smaller, larger);
     return std::any_of(smaller->begin(), smaller->end(), [&](Location location) {
-        return std::binary_search(larger->begin(), larger->end(), location);
+        return larger->contains(location);
     });
 }
 
@@ -210,8 +216,7 @@ void AddressSet::meetWith(const AddressSet& other)
         FiniteLocationSet intersection;
         for (Location location : locations_)
         {
-            if (std::binary_search(other.locations_.begin(),
-                                   other.locations_.end(), location))
+            if (other.locations_.contains(location))
                 intersection.insert(location);
         }
         locations_ = std::move(intersection);

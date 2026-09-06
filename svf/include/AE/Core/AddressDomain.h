@@ -68,6 +68,7 @@ public:
 
     std::size_t size() const;
     bool empty() const;
+    bool contains(Location location) const;
     const_iterator begin() const;
     const_iterator end() const;
     void insert(Location location);
