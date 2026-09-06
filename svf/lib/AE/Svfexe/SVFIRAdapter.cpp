@@ -40,39 +40,61 @@ Location nextLocation(std::uint64_t& next)
 SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
 {
     std::uint64_t nextVariableId = 1;
-    std::uint64_t nextLocationId = 1;
     std::map<Location, Variable> cells;
 
-    for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
-    {
-        const SVFVar* svfVariable = iterator->second;
-        if (const auto* value = SVFUtil::dyn_cast<ValVar>(svfVariable))
+    auto addScalars = [&](bool pointers) {
+        for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
         {
+            const SVFVar* svfVariable = iterator->second;
+            const auto* value = SVFUtil::dyn_cast<ValVar>(svfVariable);
+            if (!value || value->isPointer() != pointers)
+                continue;
             if (value->isConstDataOrAggDataButNotNullPtr())
                 continue;
-            if (!value->isPointer() &&
-                !SVFUtil::isa<SVFIntegerType>(value->getType()))
+            if (!pointers && !SVFUtil::isa<SVFIntegerType>(value->getType()))
                 continue;
 
             const Variable variable = nextVariable(nextVariableId);
             variables_.emplace(value, variable);
             valuesByVariableId_.resize(variable.id() + 1);
             valuesByVariableId_[variable.id()] = value;
-            continue;
         }
+    };
 
-        const auto* object = SVFUtil::dyn_cast<ObjVar>(svfVariable);
-        if (!object)
-            continue;
-        const Location location = nextLocation(nextLocationId);
-        const Variable content = nextVariable(nextVariableId);
-        locations_.emplace(object, location);
-        objects_.emplace(location, object);
-        contentVariables_.emplace(object, content);
-        contentObjectsByVariableId_.resize(content.id() + 1);
-        contentObjectsByVariableId_[content.id()] = object;
-        cells.emplace(location, content);
-    }
+    std::uint64_t nextLocationId = 1;
+    auto addObjectContents = [&](bool pointers) {
+        for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
+        {
+            const SVFVar* svfVariable = iterator->second;
+            const auto* object = SVFUtil::dyn_cast<ObjVar>(svfVariable);
+            if (!object || object->isPointer() != pointers)
+                continue;
+
+            const Location location = nextLocation(nextLocationId);
+            const Variable content = nextVariable(nextVariableId);
+            locations_.emplace(object, location);
+            objects_.emplace(location, object);
+            contentVariables_.emplace(object, content);
+            contentObjectsByVariableId_.resize(content.id() + 1);
+            contentObjectsByVariableId_[content.id()] = object;
+            cells.emplace(location, content);
+        }
+    };
+
+    // One stable analysis-wide ID space doubles as the sparse storage
+    // coordinate. Pack it by Semi-Sparse carrier first and domain second:
+    //
+    //   numerical ValVars | pointer ValVars | numerical contents | pointer
+    //   contents
+    //
+    // Every scalar/flow domain slice is a contiguous range. Dense states use
+    // two compact ranges per domain; the sparse page directory does not
+    // allocate their intervening range. Keeping all ValVars before contents
+    // also keeps both O(1) reverse-index vectors compact.
+    addScalars(false);
+    addScalars(true);
+    addObjectContents(false);
+    addObjectContents(true);
 
     memoryLayout_ = MemoryLayout(std::move(cells));
 }

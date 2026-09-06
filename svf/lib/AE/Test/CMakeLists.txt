@@ -67,6 +67,10 @@ if(TARGET SvfLLVM)
   add_box_ae_test(
     box-ae-wide-integer WideIntegerTruncation.ll dense
   )
+  set_tests_properties(
+    box-ae-projection-semi-sparse
+    PROPERTIES ENVIRONMENT "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1"
+  )
 endif()
 
 if(APPLE AND TARGET z3::libz3)

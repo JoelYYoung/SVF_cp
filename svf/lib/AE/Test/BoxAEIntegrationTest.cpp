@@ -9,8 +9,10 @@
 #include "Util/Options.h"
 #include "WPA/Andersen.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -62,6 +64,92 @@ void validateAuthoritativeStorage(AbstractInterpretation& analysis)
         throw std::runtime_error("Box AE analyzed no ICFG nodes");
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
         requireBoxState(analysis.getAbstractState(node));
+}
+
+struct StorageObservation
+{
+    std::size_t states = 0;
+    std::size_t numericalFacts = 0;
+    std::size_t numericalPages = 0;
+    std::size_t addressFacts = 0;
+    std::size_t finitePointees = 0;
+    std::size_t largestAddressSet = 0;
+
+    void observe(const BoxProgramState& state)
+    {
+        ++states;
+        const std::vector<AD::Variable> numerical =
+            state.numerical().constrainedVariables();
+        numericalFacts += numerical.size();
+        std::set<std::uint32_t> pages;
+        for (AD::Variable variable : numerical)
+            pages.insert(variable.id() / 64);
+        numericalPages += pages.size();
+
+        const std::vector<AD::Variable> pointers =
+            state.addresses().nonDefaultVariables();
+        addressFacts += pointers.size();
+        for (AD::Variable variable : pointers)
+        {
+            const AD::AddressSet addresses =
+                state.addresses().addressSet(variable);
+            if (addresses.isTop())
+                throw std::runtime_error(
+                    "Address non-default support contains Top");
+            finitePointees += addresses.size();
+            largestAddressSet = std::max(largestAddressSet, addresses.size());
+        }
+    }
+};
+
+StorageObservation observeStorage(AbstractInterpretation& analysis)
+{
+    StorageObservation observation;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+        observation.observe(requireBoxState(analysis.getAbstractState(node)));
+    if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
+        observation.observe(requireBoxState(*scalar));
+    return observation;
+}
+
+void validateVariableIdLayout(const SVFIR& graph)
+{
+    SVFIRAdapter adapter(graph);
+    std::vector<std::uint32_t> numericalScalarIds;
+    std::vector<std::uint32_t> numericalContentIds;
+    std::vector<std::uint32_t> pointerScalarIds;
+    std::vector<std::uint32_t> pointerContentIds;
+    for (auto iterator = graph.begin(); iterator != graph.end(); ++iterator)
+    {
+        const SVFVar* value = iterator->second;
+        if (const auto* scalar = SVFUtil::dyn_cast<ValVar>(value))
+        {
+            if (adapter.contains(*scalar))
+                (scalar->isPointer() ? pointerScalarIds : numericalScalarIds)
+                    .push_back(adapter.variable(*scalar).id());
+        }
+        else if (const auto* object = SVFUtil::dyn_cast<ObjVar>(value))
+        {
+            if (adapter.contains(*object))
+                (object->isPointer() ? pointerContentIds : numericalContentIds)
+                    .push_back(adapter.contentVariable(*object).id());
+        }
+    }
+
+    std::uint32_t expected = 1;
+    auto requireContiguousRange = [&](const char* name, auto& ids) {
+        std::sort(ids.begin(), ids.end());
+        for (std::uint32_t id : ids)
+        {
+            if (id != expected++)
+                throw std::runtime_error(std::string(name) +
+                                         " Variable IDs are not contiguous");
+        }
+    };
+    requireContiguousRange("numerical scalar", numericalScalarIds);
+    requireContiguousRange("pointer scalar", pointerScalarIds);
+    requireContiguousRange("numerical content", numericalContentIds);
+    requireContiguousRange("pointer content", pointerContentIds);
 }
 
 void validateProjection(const SVFIR& graph, AbstractInterpretation& analysis)
@@ -170,12 +258,25 @@ int main(int argc, char** argv)
             AbstractInterpretation::getAEInstance();
         analysis.runOnModule();
         validateAuthoritativeStorage(analysis);
+        if (std::getenv("SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT"))
+            validateVariableIdLayout(*graph);
         validateProjection(*graph, analysis);
         validateSparseMemoryRefinement(*graph, analysis);
         validateConservativeUnknownCasts(*graph, analysis);
 
         std::cout << "AE_GENERIC_OBSERVATION analyzed_nodes="
                   << analysis.getAnalyzedNodes().size() << '\n';
+        if (std::getenv("SVF_AE_STORAGE_OBSERVATION"))
+        {
+            const StorageObservation storage = observeStorage(analysis);
+            std::cout << "AE_STORAGE_OBSERVATION states=" << storage.states
+                      << " numerical_facts=" << storage.numericalFacts
+                      << " numerical_pages=" << storage.numericalPages
+                      << " address_facts=" << storage.addressFacts
+                      << " finite_pointees=" << storage.finitePointees
+                      << " largest_address_set=" << storage.largestAddressSet
+                      << '\n';
+        }
         std::cout << "Box AE integration test: PASS\n";
         AndersenWaveDiff::releaseAndersenWaveDiff();
         LLVMModuleSet::releaseLLVMModuleSet();
