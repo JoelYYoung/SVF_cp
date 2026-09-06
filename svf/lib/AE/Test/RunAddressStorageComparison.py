@@ -211,7 +211,7 @@ def main():
                 )
                 expected = len(options.candidate) * options.repetitions
                 if (completed != expected or len(signatures) != 1 or
-                        ("", "") in signatures):
+                        any(not shape for _, shape in signatures)):
                     failures.append(
                         f"{input_label}: semantic signatures={sorted(signatures)}"
                     )
