@@ -330,6 +330,10 @@ void testAddressDomain()
     require(unknown.isTop() && unknown.addressSet(p).isTop() &&
                 unknown.nonDefaultVariables().empty(),
             "Address top did not represent an unknown pointer sparsely");
+    AddressDomain independentTop = AddressDomain::top();
+    independentTop.assign(p, AddressSet::singleton(first));
+    require(unknown.isTop() && unknown.addressSet(p).isTop(),
+            "mutating one Address Top changed another Top instance");
     require(
         Location::null().isNull() &&
             AddressSet::singleton(Location::null()).contains(Location::null()),
