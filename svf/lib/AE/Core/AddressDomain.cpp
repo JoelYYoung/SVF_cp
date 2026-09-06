@@ -182,6 +182,12 @@ void AddressSet::joinWith(const AddressSet& other)
         *this = top();
         return;
     }
+    if (locations_.size() <= 2 && other.locations_.size() <= 2)
+    {
+        for (Location location : other.locations_)
+            locations_.insert(location);
+        return;
+    }
     std::vector<Location> joined;
     joined.reserve(locations_.size() + other.locations_.size());
     std::set_union(locations_.begin(), locations_.end(),
@@ -197,6 +203,18 @@ void AddressSet::meetWith(const AddressSet& other)
     if (top_)
     {
         *this = other;
+        return;
+    }
+    if (locations_.size() <= 2 && other.locations_.size() <= 2)
+    {
+        FiniteLocationSet intersection;
+        for (Location location : locations_)
+        {
+            if (std::binary_search(other.locations_.begin(),
+                                   other.locations_.end(), location))
+                intersection.insert(location);
+        }
+        locations_ = std::move(intersection);
         return;
     }
     std::vector<Location> intersection;
