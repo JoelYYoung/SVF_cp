@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", action="append", required=True)
     parser.add_argument("--baseline", required=True)
+    parser.add_argument("--phase")
     parser.add_argument("--expected-repetitions", type=int)
     parser.add_argument("--output", required=True)
     options = parser.parse_args()
@@ -27,7 +28,12 @@ def main():
     for raw_path in options.input:
         with pathlib.Path(raw_path).open(newline="") as input_file:
             rows.extend(csv.DictReader(input_file))
-    passed = [row for row in rows if row["status"] == "pass"]
+    passed = [
+        row
+        for row in rows
+        if row["status"] == "pass"
+        and (options.phase is None or row.get("phase") == options.phase)
+    ]
     candidates = sorted({row["candidate"] for row in passed})
     if options.baseline not in candidates:
         raise RuntimeError("baseline has no passing samples")
@@ -41,7 +47,7 @@ def main():
         if any((program, candidate) not in grouped for candidate in candidates):
             continue
         signatures = {
-            (row["analyzed_nodes"], row["semantic_shape_checksum"])
+            (row["analyzed_nodes"], row.get("semantic_shape_checksum", ""))
             for candidate in candidates
             for row in grouped[(program, candidate)]
             if row.get("semantic_shape_checksum")
