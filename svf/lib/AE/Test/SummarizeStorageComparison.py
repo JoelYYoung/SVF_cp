@@ -17,8 +17,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", action="append", required=True)
     parser.add_argument("--baseline", required=True)
+    parser.add_argument("--expected-repetitions", type=int)
     parser.add_argument("--output", required=True)
     options = parser.parse_args()
+    if options.expected_repetitions is not None and options.expected_repetitions <= 0:
+        parser.error("--expected-repetitions must be positive")
 
     rows = []
     for raw_path in options.input:
@@ -48,6 +51,12 @@ def main():
         medians = {}
         for candidate in candidates:
             samples = grouped[(program, candidate)]
+            if (options.expected_repetitions is not None and
+                    len(samples) != options.expected_repetitions):
+                raise RuntimeError(
+                    f"{program}/{candidate} has {len(samples)} samples; "
+                    f"expected {options.expected_repetitions}"
+                )
             times = [float(row["seconds"]) for row in samples]
             rss = [
                 int(row["peak_rss_bytes"])
