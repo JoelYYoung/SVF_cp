@@ -61,8 +61,7 @@ Interval integerInterval(std::int64_t value)
 void testScalarTransferOperations()
 {
     require(Rational::fromDouble(0.0) == Rational(0) &&
-                Rational::fromDouble(0.5) ==
-                    Rational(Integer(1), Integer(2)),
+                Rational::fromDouble(0.5) == Rational(Integer(1), Integer(2)),
             "native floating-to-rational conversion was not exact");
     const Interval two = integerInterval(2);
     const Interval four = integerInterval(4);
@@ -125,12 +124,9 @@ void testLatticeAndTransferSurface()
 {
     const Variable x(1);
     const Variable y(2);
-    const Variable z(3);
-    const VariableEnvironment environment({{x, NumericType::integer(), "x"},
-                                           {y, NumericType::integer(), "y"},
-                                           {z, NumericType::real(), "z"}});
+    const Variable z(3, NumericType::real());
 
-    BoxDomain state = BoxDomain::top(environment);
+    BoxDomain state = BoxDomain::top();
     require(state.kind() == DomainKind::Box,
             "Box property reported the wrong DomainKind");
     const std::unique_ptr<AbstractDomain> cloned = state.clone();
@@ -138,6 +134,8 @@ void testLatticeAndTransferSurface()
             "AbstractDomain clone lost the concrete Box property type");
     state.assume(atLeast(x, Rational(0)));
     state.assume(atMost(x, Rational(10)));
+    state.assume(
+        greaterThan(LinearExpression(z), LinearExpression(Rational("1/2"))));
     state.assign(y, LinearExpression(x) + LinearExpression(Rational(2)));
     require(hasBounds(state.bound(x), Rational(0), Rational(10)) &&
                 hasBounds(state.bound(y), Rational(2), Rational(12)),
@@ -145,6 +143,9 @@ void testLatticeAndTransferSurface()
     require(hasBounds(state.bound(LinearExpression(x) + LinearExpression(y)),
                       Rational(2), Rational(22)),
             "Box expression bounds did not use all terms");
+    require(state.bound(z).lower().isStrict() &&
+                state.bound(z).lower().value() == Rational("1/2"),
+            "Box applied integer tightening to a typed real variable");
 
     BoxDomain simultaneous = state;
     simultaneous.assignParallel(
@@ -153,14 +154,14 @@ void testLatticeAndTransferSurface()
                 hasBounds(simultaneous.bound(y), Rational(0), Rational(10)),
             "Box parallel assignment was not simultaneous");
 
-    BoxDomain post = BoxDomain::top(environment);
+    BoxDomain post = BoxDomain::top();
     post.assume(atLeast(y, Rational(5)));
     post.assume(atMost(y, Rational(7)));
     post.substitute(y, LinearExpression(x) + LinearExpression(Rational(1)));
     require(hasBounds(post.bound(x), Rational(4), Rational(6)),
             "Box backward substitution computed the wrong preimage");
 
-    BoxDomain alternative = BoxDomain::top(environment);
+    BoxDomain alternative = BoxDomain::top();
     alternative.assume(atLeast(x, Rational(5)));
     alternative.assume(atMost(x, Rational(20)));
     const BoxDomain joined = state.join(alternative);
@@ -179,47 +180,42 @@ void testLatticeAndTransferSurface()
                 Rational(20),
             "Box narrowing did not recover the finite successor bound");
 
-    BoxDomain contradiction = BoxDomain::top(environment);
+    BoxDomain contradiction = BoxDomain::top();
     contradiction.assume(atLeast(x, Rational(2)));
     contradiction.assume(atMost(x, Rational(1)));
     require(contradiction.isBottom(),
             "Box failed to detect contradictory bounds");
 }
 
-void testEnvironmentExpandFoldAndTrees()
+void testStableVocabularyExpandFoldAndTrees()
 {
     const Variable x(1);
     const Variable y(2);
     const Variable copy(4097);
-    const VariableEnvironment base(
-        {{x, NumericType::integer(), "x"}, {y, NumericType::integer(), "y"}});
-    BoxDomain state = BoxDomain::top(base);
+    BoxDomain state = BoxDomain::top();
+    require(state.bound(copy).isTop(),
+            "an unmaterialized stable variable was not Top");
     state.assume(atLeast(x, Rational(1)));
     state.assume(atMost(x, Rational(3)));
-    state.expand(x, {{copy, NumericType::integer(), "copy"}});
+    state.expand(x, {copy});
     require(hasBounds(state.bound(copy), Rational(1), Rational(3)),
             "Box expand did not duplicate the source interval");
     state.assume(atLeast(copy, Rational(2)));
     state.fold(x, {copy});
-    require(!state.environment().contains(copy) &&
+    require(state.bound(copy).isTop() &&
                 hasBounds(state.bound(x), Rational(1), Rational(3)),
-            "Box fold did not merge and remove the expanded dimension");
+            "Box fold did not merge and forget the folded variable");
 
-    const VariableEnvironment extended =
-        state.environment().add({{copy, NumericType::integer(), "copy"}});
-    state.changeEnvironment(extended, true);
-    require(hasBounds(state.bound(copy), Rational(0), Rational(0)),
-            "Box environment extension did not initialize a new variable");
-    state.changeEnvironment(base);
-    require(!state.environment().contains(copy),
-            "Box environment projection retained a removed variable");
-    requireThrows(
-        [&] {
-            state.changeEnvironment(
-                VariableEnvironment({{x, NumericType::real(), "x"},
-                                     {y, NumericType::integer(), "y"}}));
-        },
-        "Box accepted an environment type change");
+    BoxDomain unknown = BoxDomain::top();
+    require(state.join(unknown).isTop() &&
+                state.meet(unknown).isEquivalentTo(state) == CheckResult::True,
+            "Box did not interpret a missing stable variable as Top");
+
+    const Variable realX(x.id(), NumericType::real());
+    requireThrows([&] { (void)state.bound(realX); },
+                  "Box accepted two numeric types for one stable variable ID");
+    requireThrows([&] { state.forget(realX); },
+                  "Box forgot a slot through a mismatched typed variable");
 
     TreeExpression xTree = TreeExpression::variable(x, NumericType::integer());
     TreeExpression two =
@@ -232,15 +228,13 @@ void testEnvironmentExpandFoldAndTrees()
 
 void testPagedCopyOnWriteAndSerialization()
 {
-    std::vector<VariableDeclaration> declarations;
+    std::vector<Variable> variables;
     for (std::uint32_t id = 0; id < 256; ++id)
-        declarations.push_back({Variable(id * 17 + 1), NumericType::integer(),
-                                "v" + std::to_string(id)});
-    const VariableEnvironment environment(std::move(declarations));
-    const Variable first = environment.variableOf(0);
-    const Variable distant = environment.variableOf(200);
+        variables.emplace_back(id * 17 + 1);
+    const Variable first = variables.front();
+    const Variable distant(variables[200].id(), NumericType::real());
 
-    BoxDomain original = BoxDomain::top(environment);
+    BoxDomain original = BoxDomain::top();
     original.assume(atLeast(first, Rational(1)));
     original.assume(atMost(first, Rational(3)));
     original.assume(atLeast(distant, Rational(9)));
@@ -271,17 +265,11 @@ void testProgramStateMemoryFacet()
     const Variable source(2);
     const Variable target(3);
     const Variable cell(4);
-    const VariableEnvironment environment(
-        {{pointer, NumericType::integer(), "pointer"},
-         {source, NumericType::integer(), "source"},
-         {target, NumericType::integer(), "target"},
-         {cell, NumericType::integer(), "cell"}});
     const Location object(10);
-    BoxProgramState state(BoxDomain::top(environment),
-                          MemoryLayout({{object, cell}}));
+    BoxProgramState state(BoxDomain::top(), MemoryLayout({{object, cell}}));
     require(state.isTop(),
             "empty typed Box program state was not unconstrained");
-    BoxProgramState unreachable(BoxDomain::bottom(environment),
+    BoxProgramState unreachable(BoxDomain::bottom(),
                                 MemoryLayout({{object, cell}}));
     BoxProgramState firstMerge = unreachable;
     firstMerge.joinWith(state);
@@ -321,13 +309,11 @@ void testLifetimeDomain()
 
     LifetimeDomain maybeFreed = alive;
     maybeFreed.joinWith(freed);
-    require(maybeFreed.mayBeFreed(object) &&
-                !maybeFreed.mustBeFreed(object),
+    require(maybeFreed.mayBeFreed(object) && !maybeFreed.mustBeFreed(object),
             "lifetime join lost a path-dependent release");
     maybeFreed.meetWith(alive);
     require(maybeFreed.statusOf(object) == Lifetime::Alive,
             "lifetime meet did not recover the live alternative");
-
 }
 
 void testAddressDomain()
@@ -336,14 +322,11 @@ void testAddressDomain()
     const Variable q(2);
     const Location first(10);
     const Location second(20);
-    const VariableEnvironment environment(
-        {{p, NumericType::integer(), "p"}, {q, NumericType::integer(), "q"}});
-
-    AddressDomain addresses = AddressDomain::bottom(environment);
-    require(addresses.kind() == DomainKind::Address && addresses.isBottom() &&
-                addresses.addressSet(p).isBottom(),
-            "Address bottom did not define the vocabulary-wide default");
-    AddressDomain unknown = AddressDomain::top(environment);
+    AddressDomain unreachable = AddressDomain::bottom();
+    require(unreachable.kind() == DomainKind::Address &&
+                unreachable.isBottom() && unreachable.addressSet(p).isBottom(),
+            "Address bottom did not represent an unreachable property");
+    AddressDomain unknown = AddressDomain::top();
     require(unknown.isTop() && unknown.addressSet(p).isTop() &&
                 unknown.nonDefaultVariables().empty(),
             "Address top did not represent an unknown pointer sparsely");
@@ -352,6 +335,7 @@ void testAddressDomain()
             AddressSet::singleton(Location::null()).contains(Location::null()),
         "Address domain did not preserve the explicit null location");
 
+    AddressDomain addresses = AddressDomain::top();
     addresses.assign(p, AddressSet::singleton(first));
     AddressDomain copy = addresses;
     copy.assign(p, AddressSet::singleton(second));
@@ -379,18 +363,30 @@ void testAddressDomain()
     require(met.isEquivalentTo(addresses) == CheckResult::True,
             "Address meet did not compute set intersection");
 
-    const VariableEnvironment projected({{q, NumericType::integer(), "q"}});
-    joined.changeEnvironment(projected);
-    require(!joined.environment().contains(p) && joined.isBottom(),
-            "Address environment projection retained an out-of-scope fact");
-    requireThrows([&] { (void)joined.addressSet(p); },
-                  "Address query accepted a variable outside its environment");
+    AddressDomain disjoint = AddressDomain::top();
+    disjoint.assign(p, AddressSet::singleton(second));
+    disjoint.meetWith(addresses);
+    require(!disjoint.isBottom() && disjoint.addressSet(p).isBottom(),
+            "an empty pointer intersection was confused with carrier Bottom");
 
-    AddressDomain incompatible = AddressDomain::top(projected);
-    requireThrows([&] { incompatible.joinWith(addresses); },
-                  "Address join silently guessed an environment conversion");
-    BoxDomain numerical = BoxDomain::top(projected);
-    requireThrows([&] { incompatible.joinWith(numerical); },
+    AddressDomain bottomIdentity = AddressDomain::bottom();
+    bottomIdentity.joinWith(addresses);
+    require(bottomIdentity.isEquivalentTo(addresses) == CheckResult::True,
+            "whole-property Address Bottom was not the join identity");
+
+    joined.forget(p);
+    require(joined.isTop() && joined.addressSet(p).isTop() &&
+                joined.addressSet(q).isTop(),
+            "Address forget did not restore the missing-is-Top invariant");
+
+    AddressDomain emptyPointer = AddressDomain::top();
+    emptyPointer.assign(p, AddressSet::bottom());
+    require(!emptyPointer.isBottom() && emptyPointer.addressSet(p).isBottom() &&
+                emptyPointer.addressSet(q).isTop(),
+            "an empty pointer fact was confused with whole-property Bottom");
+
+    BoxDomain numerical = BoxDomain::top();
+    requireThrows([&] { unknown.joinWith(numerical); },
                   "AbstractDomain accepted a cross-kind lattice operation");
 }
 } // namespace
@@ -401,7 +397,7 @@ int main()
     {
         testLatticeAndTransferSurface();
         testScalarTransferOperations();
-        testEnvironmentExpandFoldAndTrees();
+        testStableVocabularyExpandFoldAndTrees();
         testPagedCopyOnWriteAndSerialization();
         testProgramStateMemoryFacet();
         testLifetimeDomain();

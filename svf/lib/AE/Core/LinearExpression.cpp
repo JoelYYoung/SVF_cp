@@ -100,8 +100,7 @@ void LinearExpression::removeZeroTerms()
     }
 }
 
-std::string LinearExpression::toString(
-    const VariableEnvironment* environment) const
+std::string LinearExpression::toString() const
 {
     std::ostringstream output;
     bool first = true;
@@ -111,11 +110,7 @@ std::string LinearExpression::toString(
             output << " + ";
         first = false;
         output << coefficient.toString() << '*';
-        if (environment && environment->contains(variable) &&
-            !environment->nameOf(variable).empty())
-            output << environment->nameOf(variable);
-        else
-            output << 'v' << variable.id();
+        output << 'v' << variable.id();
     }
     if (!constant_.isZero() || first)
     {
@@ -238,8 +233,7 @@ LinearConstraint::LinearConstraint(LinearExpression expression,
 {
 }
 
-std::string LinearConstraint::toString(
-    const VariableEnvironment* environment) const
+std::string LinearConstraint::toString() const
 {
     const char* relation;
     switch (kind_)
@@ -265,7 +259,7 @@ std::string LinearConstraint::toString(
     default:
         throw std::logic_error("unknown linear constraint kind");
     }
-    return expression_.toString(environment) + ' ' + relation + " 0";
+    return expression_.toString() + ' ' + relation + " 0";
 }
 
 TreeConstraint::TreeConstraint(TreeExpression expression, ConstraintKind kind)

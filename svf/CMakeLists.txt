@@ -2,7 +2,7 @@
 # these sources includes SVF IR or LLVM headers.
 set(ABSTRACT_DOMAIN_CORE_HEADERS
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/AbstractDomain.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/VariableEnvironment.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/Variable.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/LinearExpression.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/TreeExpression.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/NumericalDomain.h
@@ -13,7 +13,6 @@ set(ABSTRACT_DOMAIN_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/AbstractDomain.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/AddressDomain.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/BoxProgramState.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/VariableEnvironment.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/LinearExpression.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/NumericalDomain.cpp
 )

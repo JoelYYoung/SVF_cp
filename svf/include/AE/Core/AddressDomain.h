@@ -4,7 +4,7 @@
 #define SVF_AE_ADDRESS_DOMAIN_H
 
 #include "AE/Core/AbstractDomain.h"
-#include "AE/Core/VariableEnvironment.h"
+#include "AE/Core/Variable.h"
 
 #include <cstdint>
 #include <map>
@@ -103,13 +103,15 @@ private:
     std::set<Location> locations_;
 };
 
-/// Complete address-domain property over an immutable variable vocabulary.
-/// Missing entries have the single default selected by top()/bottom().
+/// Flow-sensitive address property with finite non-Top support over stable
+/// Variables. Missing entries in every non-Bottom property denote Address Top.
+/// An explicit empty AddressSet is a per-variable fact; it is distinct from
+/// whole-property Bottom, which denotes an unreachable address carrier.
 class AddressDomain final : public AbstractDomain
 {
 public:
-    static AddressDomain top(const VariableEnvironment& environment);
-    static AddressDomain bottom(const VariableEnvironment& environment);
+    static AddressDomain top();
+    static AddressDomain bottom();
 
     DomainKind kind() const noexcept override
     {
@@ -117,25 +119,17 @@ public:
     }
     std::unique_ptr<AbstractDomain> clone() const override;
 
-    const VariableEnvironment& environment() const
-    {
-        return environment_;
-    }
     AddressSet addressSet(Variable variable) const;
-    /// Variables with a value different from the domain's uniform default.
-    /// This exposes physical sparsity without assigning semantic meaning to
-    /// an absent map entry.
+    /// Variables with a value different from Address Top.
     std::vector<Variable> nonDefaultVariables() const;
     void assign(Variable variable, AddressSet addresses);
     void forget(Variable variable);
-    void changeEnvironment(const VariableEnvironment& environment);
 
 private:
     using Values = std::map<Variable, AddressSet>;
 
-    AddressDomain(VariableEnvironment environment, bool defaultTop)
-        : environment_(std::move(environment)), defaultTop_(defaultTop),
-          values_(std::make_shared<Values>())
+    explicit AddressDomain(bool bottom)
+        : bottom_(bottom), values_(std::make_shared<Values>())
     {
     }
 
@@ -156,10 +150,9 @@ private:
     const AddressDomain& requireAddress(const AbstractDomain& other) const;
     void normalize(Variable variable);
     Values& writableValues();
-    AddressSet defaultValue() const;
+    void makeBottom();
 
-    VariableEnvironment environment_;
-    bool defaultTop_ = false;
+    bool bottom_ = false;
     std::shared_ptr<Values> values_;
 };
 

@@ -160,14 +160,14 @@ std::string AddressSet::toString() const
     return output.str();
 }
 
-AddressDomain AddressDomain::top(const VariableEnvironment& environment)
+AddressDomain AddressDomain::top()
 {
-    return AddressDomain(environment, true);
+    return AddressDomain(false);
 }
 
-AddressDomain AddressDomain::bottom(const VariableEnvironment& environment)
+AddressDomain AddressDomain::bottom()
 {
-    return AddressDomain(environment, false);
+    return AddressDomain(true);
 }
 
 std::unique_ptr<AbstractDomain> AddressDomain::clone() const
@@ -177,10 +177,10 @@ std::unique_ptr<AbstractDomain> AddressDomain::clone() const
 
 AddressSet AddressDomain::addressSet(Variable variable) const
 {
-    if (!environment_.contains(variable))
-        throw std::invalid_argument("address variable is outside environment");
+    if (bottom_)
+        return AddressSet::bottom();
     const auto iterator = values_->find(variable);
-    return iterator == values_->end() ? defaultValue() : iterator->second;
+    return iterator == values_->end() ? AddressSet::top() : iterator->second;
 }
 
 std::vector<Variable> AddressDomain::nonDefaultVariables() const
@@ -197,8 +197,8 @@ std::vector<Variable> AddressDomain::nonDefaultVariables() const
 
 void AddressDomain::assign(Variable variable, AddressSet addresses)
 {
-    if (!environment_.contains(variable))
-        throw std::invalid_argument("address variable is outside environment");
+    if (bottom_)
+        return;
     writableValues()[variable] = std::move(addresses);
     normalize(variable);
 }
@@ -208,78 +208,53 @@ void AddressDomain::forget(Variable variable)
     assign(variable, AddressSet::top());
 }
 
-void AddressDomain::changeEnvironment(const VariableEnvironment& environment)
-{
-    for (const VariableDeclaration& declaration : environment_.variables())
-    {
-        if (environment.contains(declaration.variable) &&
-            environment.typeOf(declaration.variable) != declaration.type)
-            throw std::invalid_argument(
-                "address environment changed a variable type");
-    }
-
-    const bool hasOutOfScope =
-        std::any_of(values_->begin(), values_->end(), [&](const auto& entry) {
-            return !environment.contains(entry.first);
-        });
-    if (hasOutOfScope)
-    {
-        Values& values = writableValues();
-        for (auto iterator = values.begin(); iterator != values.end();)
-        {
-            if (!environment.contains(iterator->first))
-                iterator = values.erase(iterator);
-            else
-                ++iterator;
-        }
-    }
-    environment_ = environment;
-}
-
 bool AddressDomain::hasCompatibleDomain(const AbstractDomain& other) const
 {
-    return other.isDomain<AddressDomain>() &&
-           environment_ ==
-               static_cast<const AddressDomain&>(other).environment_;
+    return other.isDomain<AddressDomain>();
 }
 
 void AddressDomain::joinDomain(const AbstractDomain& other)
 {
     const AddressDomain& address = requireAddress(other);
-    const std::set<Variable> variables =
-        combinedKeys(*values_, *address.values_);
-    const bool nextDefaultTop = defaultTop_ || address.defaultTop_;
-    Values next;
-    for (Variable variable : variables)
+    if (address.bottom_)
+        return;
+    if (bottom_)
     {
-        AddressSet value = addressSet(variable);
-        value.joinWith(address.addressSet(variable));
-        const AddressSet nextDefault =
-            nextDefaultTop ? AddressSet::top() : AddressSet::bottom();
-        if (value != nextDefault)
-            next.emplace(variable, std::move(value));
+        *this = address;
+        return;
     }
-    defaultTop_ = nextDefaultTop;
+    Values next;
+    for (const auto& [variable, value] : *values_)
+    {
+        const auto otherValue = address.values_->find(variable);
+        if (otherValue == address.values_->end())
+            continue;
+        AddressSet joined = value;
+        joined.joinWith(otherValue->second);
+        if (!joined.isTop())
+            next.emplace(variable, std::move(joined));
+    }
     values_ = std::make_shared<Values>(std::move(next));
 }
 
 void AddressDomain::meetDomain(const AbstractDomain& other)
 {
     const AddressDomain& address = requireAddress(other);
+    if (bottom_ || address.bottom_)
+    {
+        makeBottom();
+        return;
+    }
     const std::set<Variable> variables =
         combinedKeys(*values_, *address.values_);
-    const bool nextDefaultTop = defaultTop_ && address.defaultTop_;
     Values next;
     for (Variable variable : variables)
     {
         AddressSet value = addressSet(variable);
         value.meetWith(address.addressSet(variable));
-        const AddressSet nextDefault =
-            nextDefaultTop ? AddressSet::top() : AddressSet::bottom();
-        if (value != nextDefault)
+        if (!value.isTop())
             next.emplace(variable, std::move(value));
     }
-    defaultTop_ = nextDefaultTop;
     values_ = std::make_shared<Values>(std::move(next));
 }
 
@@ -295,35 +270,36 @@ void AddressDomain::narrowDomain(const AbstractDomain& next)
 
 bool AddressDomain::isBottomDomain() const
 {
-    return !defaultTop_ && values_->empty();
+    return bottom_;
 }
 
 bool AddressDomain::isTopDomain() const
 {
-    return defaultTop_ && values_->empty();
+    return !bottom_ && values_->empty();
 }
 
 bool AddressDomain::leqDomain(const AbstractDomain& other) const
 {
     const AddressDomain& address = requireAddress(other);
-    if (defaultTop_ == address.defaultTop_ &&
-        (values_ == address.values_ || *values_ == *address.values_))
+    if (bottom_)
         return true;
-    if (defaultTop_ && !address.defaultTop_)
+    if (address.bottom_)
         return false;
-    const std::set<Variable> variables =
-        combinedKeys(*values_, *address.values_);
-    return std::all_of(variables.begin(), variables.end(),
-                       [&](Variable variable) {
-                           return addressSet(variable).isSubsetOf(
-                               address.addressSet(variable));
-                       });
+    if (values_ == address.values_ || *values_ == *address.values_)
+        return true;
+    return std::all_of(
+        address.values_->begin(), address.values_->end(),
+        [&](const auto& entry) {
+            return addressSet(entry.first).isSubsetOf(entry.second);
+        });
 }
 
 std::string AddressDomain::domainToString() const
 {
     std::ostringstream output;
-    output << "default=" << defaultValue().toString() << " {";
+    if (bottom_)
+        return "bottom";
+    output << "{";
     bool first = true;
     for (const auto& [variable, value] : *values_)
     {
@@ -346,7 +322,7 @@ const AddressDomain& AddressDomain::requireAddress(
 void AddressDomain::normalize(Variable variable)
 {
     const auto iterator = values_->find(variable);
-    if (iterator != values_->end() && iterator->second == defaultValue())
+    if (iterator != values_->end() && iterator->second.isTop())
         writableValues().erase(variable);
 }
 
@@ -357,9 +333,10 @@ AddressDomain::Values& AddressDomain::writableValues()
     return *values_;
 }
 
-AddressSet AddressDomain::defaultValue() const
+void AddressDomain::makeBottom()
 {
-    return defaultTop_ ? AddressSet::top() : AddressSet::bottom();
+    bottom_ = true;
+    values_ = std::make_shared<Values>();
 }
 
 } // namespace SVF::AbstractDomain

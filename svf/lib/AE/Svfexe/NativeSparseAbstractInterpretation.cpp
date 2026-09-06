@@ -70,9 +70,7 @@ NativeSemiSparseAbstractInterpretation::NativeSemiSparseAbstractInterpretation()
 NativeSemiSparseAbstractInterpretation::DenseState
 NativeSemiSparseAbstractInterpretation::flowState(bool bottom) const
 {
-    const AD::VariableEnvironment& environment = this->adapter_.environment();
-    return DenseState(bottom ? AD::BoxDomain::bottom(environment)
-                             : AD::BoxDomain::top(environment),
+    return DenseState(bottom ? AD::BoxDomain::bottom() : AD::BoxDomain::top(),
                       this->adapter_.memoryLayout());
 }
 
@@ -80,9 +78,8 @@ NativeSemiSparseAbstractInterpretation::DenseState&
 NativeSemiSparseAbstractInterpretation::scalarState()
 {
     if (!scalarState_)
-        scalarState_.emplace(
-            AD::BoxDomain::top(this->adapter_.scalarEnvironment()),
-            this->adapter_.memoryLayout());
+        scalarState_.emplace(AD::BoxDomain::top(),
+                             this->adapter_.memoryLayout());
     return *scalarState_;
 }
 
@@ -173,16 +170,13 @@ AD::Interval NativeSemiSparseAbstractInterpretation::getInterval(
     if (node && this->hasAbsState(node))
     {
         const DenseState& local = this->state(node);
-        if (local.numerical().environment().contains(variable))
+        const AD::Interval refined = local.numerical().bound(variable);
+        if (!refined.isTop())
         {
-            const AD::Interval refined = local.numerical().bound(variable);
-            if (!refined.isTop())
-            {
-                if (result.isBottom())
-                    result = refined;
-                else
-                    result.meetWith(refined);
-            }
+            if (result.isBottom())
+                result = refined;
+            else
+                result.meetWith(refined);
         }
     }
     return result;
@@ -447,13 +441,13 @@ void NativeSemiSparseAbstractInterpretation::scatterCycleValues(
         if (!value || !this->adapter_.contains(*value))
             continue;
         const AD::Variable variable = this->adapter_.variable(*value);
-        updateValue(
-            value,
-            value->isPointer() ? AD::Interval::bottom()
-                               : cycleState.numerical().bound(variable),
-            value->isPointer() ? cycleState.addresses().addressSet(variable)
-                               : AD::AddressSet::bottom(),
-            cycle->head()->getICFGNode());
+        updateValue(value,
+                    value->isPointer() ? AD::Interval::bottom()
+                                       : cycleState.numerical().bound(variable),
+                    value->isPointer()
+                        ? cycleState.addresses().addressSet(variable)
+                        : AD::AddressSet::bottom(),
+                    cycle->head()->getICFGNode());
     }
 }
 

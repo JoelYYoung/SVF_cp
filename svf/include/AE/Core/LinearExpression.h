@@ -44,8 +44,7 @@ public:
     LinearExpression substituted(
         const std::map<Variable, LinearExpression>& replacements) const;
 
-    std::string toString(
-        const VariableEnvironment* environment = nullptr) const;
+    std::string toString() const;
 
     friend LinearExpression operator+(LinearExpression lhs,
                                       const LinearExpression& rhs)
@@ -102,8 +101,7 @@ public:
     {
         return kind_;
     }
-    std::string toString(
-        const VariableEnvironment* environment = nullptr) const;
+    std::string toString() const;
 
 private:
     LinearExpression expression_;

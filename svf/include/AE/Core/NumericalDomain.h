@@ -4,7 +4,7 @@
 #define SVF_AE_NUMERICAL_DOMAIN_H
 
 #include "AE/Core/AbstractDomain.h"
-#include "AE/Core/VariableEnvironment.h"
+#include "AE/Core/Variable.h"
 
 #include <gmpxx.h>
 #include <mpfr.h>
@@ -365,7 +365,6 @@ enum class OperationKind
     Assumption,
     Substitution,
     Forget,
-    EnvironmentChange,
     Join,
     Meet,
     Widening,
@@ -418,9 +417,9 @@ public:
     /// equality is not a substitute for an exact equivalence check.
     std::uint64_t hash() const;
 
-    /// Serialize the domain kind, operation-relevant configuration,
-    /// environment, and canonical mathematical state into a versioned binary
-    /// buffer. Diagnostic sinks are observational and are not serialized.
+    /// Serialize the domain kind, operation-relevant configuration, and
+    /// canonical mathematical state into a versioned binary buffer.
+    /// Diagnostic sinks are observational and are not serialized.
     RawBuffer serializeRaw() const;
 
     /// Restore a Box property from serializeRaw().
@@ -432,16 +431,12 @@ public:
     {
         return lastOperation_;
     }
-    virtual const VariableEnvironment& environment() const = 0;
-
     virtual void assign(Variable target,
                         const LinearExpression& expression) = 0;
     virtual void assign(Variable target, const TreeExpression& expression) = 0;
     /// Assign every target simultaneously. Every right-hand side reads the
     /// same incoming state, including old values of all assigned targets.
-    /// The default implementation uses temporary dimensions; domains may
-    /// override it with a representation-native implementation.
-    virtual void assignParallel(const LinearAssignmentList& assignments);
+    virtual void assignParallel(const LinearAssignmentList& assignments) = 0;
     virtual void assignParallel(const TreeAssignmentList& assignments);
     /// Compute the preimage of this post-state under target := expression.
     /// This is APRON's substitute operation, not a forward strong update.
@@ -456,20 +451,16 @@ public:
     virtual void assume(const LinearConstraint& constraint) = 0;
     virtual void assume(const TreeConstraint& constraint) = 0;
     virtual void forget(Variable variable) = 0;
-    virtual void changeEnvironment(
-        const VariableEnvironment& environment,
-        bool initializeNewVariablesToZero = false) = 0;
-
-    /// Duplicate a summary dimension into new dimensions. Every copy has the
-    /// source dimension's relations with all other dimensions, while the
-    /// expanded dimensions remain mutually unrelated except where those
+    /// Duplicate a summary variable into fresh variables. Every copy has the
+    /// source variable's relations with all other variables, while the
+    /// expanded variables remain mutually unrelated except where those
     /// duplicated relations logically imply otherwise. This is APRON's
     /// expand operation.
     virtual void expand(Variable source,
-                        const std::vector<VariableDeclaration>& copies) = 0;
-    /// Merge several materialized dimensions into `target` by taking the
+                        const std::vector<Variable>& copies) = 0;
+    /// Merge several materialized variables into `target` by taking the
     /// abstract hull of every possible representative, then remove the other
-    /// dimensions. This is APRON's fold operation.
+    /// variables. This is APRON's fold operation.
     virtual void fold(Variable target, const std::vector<Variable>& folded) = 0;
 
     /// Assume every constraint, letting them propagate into each other until
@@ -507,11 +498,6 @@ public:
         canonicalize();
     }
 
-    /// Align both states to the union variable schema in one API-level
-    /// operation. Lattice compatibility is still checked later.
-    VariableEnvironment unifyEnvironmentWith(
-        NumericalDomain& other, bool initializeNewVariablesToZero = false);
-
 protected:
     /// Evaluate nonlinear and finite IEEE trees by sound interval semantics,
     /// applying each IEEE node's requested rounding mode at its endpoints.
@@ -543,8 +529,8 @@ struct BoxSemanticConfig
     }
 };
 
-/// Non-relational numerical property with one exact-rational interval per
-/// environment dimension.
+/// Non-relational numerical property with finite non-Top support over stable
+/// typed Variables. Variable IDs are the global sparse page coordinates.
 class BoxDomain final : public NumericalDomain
 {
 public:
@@ -553,12 +539,9 @@ public:
     using NumericalDomain::substitute;
     using NumericalDomain::substituteParallel;
 
-    static BoxDomain top(const VariableEnvironment& environment,
-                         const BoxSemanticConfig& config = {});
-    static BoxDomain bottom(const VariableEnvironment& environment,
-                            const BoxSemanticConfig& config = {});
-    static BoxDomain fromConstraints(const VariableEnvironment& environment,
-                                     const LinearConstraintSet& constraints,
+    static BoxDomain top(const BoxSemanticConfig& config = {});
+    static BoxDomain bottom(const BoxSemanticConfig& config = {});
+    static BoxDomain fromConstraints(const LinearConstraintSet& constraints,
                                      const BoxSemanticConfig& config = {});
 
     BoxDomain(const BoxDomain& other);
@@ -571,10 +554,6 @@ public:
         return DomainKind::Box;
     }
     std::unique_ptr<AbstractDomain> clone() const override;
-    const VariableEnvironment& environment() const override
-    {
-        return environment_;
-    }
     const BoxSemanticConfig& config() const
     {
         return config_;
@@ -589,17 +568,14 @@ public:
     void assume(const LinearConstraint& constraint) override;
     void assume(const TreeConstraint& constraint) override;
     void forget(Variable variable) override;
-    void changeEnvironment(const VariableEnvironment& environment,
-                           bool initializeNewVariablesToZero = false) override;
-    void expand(Variable source,
-                const std::vector<VariableDeclaration>& copies) override;
+    void expand(Variable source, const std::vector<Variable>& copies) override;
     void fold(Variable target, const std::vector<Variable>& folded) override;
 
     CheckResult entails(const LinearConstraint& constraint) const override;
     Interval bound(Variable variable) const override;
     Interval bound(const LinearExpression& expression) const override;
     /// Variables whose bounds are represented explicitly because they are
-    /// stricter than the vocabulary-wide Top default. This is a storage
+    /// stricter than the analysis-wide Top default. This is a storage
     /// observation for sparse scheduling; absence never means undefined.
     std::vector<Variable> constrainedVariables() const;
     LinearConstraintSet toConstraints() const override;
@@ -615,9 +591,20 @@ public:
 private:
     static constexpr std::size_t BoundsPerPage = 64;
 
+    struct BoundSlot
+    {
+        Variable variable;
+        Interval interval;
+
+        friend bool operator==(const BoundSlot& lhs, const BoundSlot& rhs)
+        {
+            return lhs.variable == rhs.variable && lhs.interval == rhs.interval;
+        }
+    };
+
     struct BoundPage
     {
-        std::array<std::optional<Interval>, BoundsPerPage> bounds;
+        std::array<std::optional<BoundSlot>, BoundsPerPage> bounds;
     };
 
     struct BoundPageEntry
@@ -627,8 +614,7 @@ private:
     };
 
     using BoundPageDirectory = std::vector<BoundPageEntry>;
-    BoxDomain(VariableEnvironment environment, BoxSemanticConfig config,
-              bool bottom);
+    BoxDomain(BoxSemanticConfig config, bool bottom);
 
     const void* dynamicTypeToken() const noexcept override
     {
@@ -645,17 +631,16 @@ private:
     std::string domainToString() const override;
 
     const BoxDomain& requireBox(const AbstractDomain& other) const;
-    const Interval& boundAt(Dimension dimension) const;
+    const Interval& boundAt(Variable variable) const;
     BoundPage& writablePage(std::size_t pageIndex);
-    void eraseBound(Dimension dimension);
+    void eraseBound(Variable variable);
     static bool pageIsEmpty(const BoundPage& page);
-    std::vector<Dimension> boundedDimensions() const;
+    std::vector<Variable> boundedVariables() const;
     void makeBottom();
-    void canonicalize(Dimension dimension);
-    void setBound(Dimension dimension, Interval interval);
+    void canonicalize(Variable variable);
+    void setBound(Variable variable, Interval interval);
     void report(OperationKind operation, ApproximationKind approximation,
                 std::string reason, bool best = true) const;
-    VariableEnvironment environment_;
     BoxSemanticConfig config_;
     /// Missing pages and empty slots denote top. Active pages are kept sorted,
     /// shared by property copies, and detached only when one of their bounds

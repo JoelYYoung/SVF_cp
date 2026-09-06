@@ -18,7 +18,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/LinearExpression.cpp
     ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/BoxProgramState.cpp
     ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/NumericalDomain.cpp
-    ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/VariableEnvironment.cpp
   )
   target_compile_features(AbstractDomainCore PUBLIC cxx_std_17)
   target_include_directories(
@@ -63,7 +62,7 @@ if(TARGET SvfLLVM)
     )
   endforeach()
   add_box_ae_test(
-    box-ae-global-scalar-environment GlobalScalarEnvironment.ll dense
+    box-ae-global-scalar-carrier GlobalScalarCarrier.ll dense
   )
   add_box_ae_test(
     box-ae-wide-integer WideIntegerTruncation.ll dense

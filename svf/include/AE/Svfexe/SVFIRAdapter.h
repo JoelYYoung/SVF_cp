@@ -34,9 +34,6 @@ public:
     bool isPointer(AbstractDomain::Variable variable) const;
     const ObjVar& object(AbstractDomain::Location location) const;
 
-    const AbstractDomain::VariableEnvironment& environment() const;
-    const AbstractDomain::VariableEnvironment& scalarEnvironment() const;
-
     const AbstractDomain::MemoryLayout& memoryLayout() const
     {
         return memoryLayout_;
@@ -49,8 +46,6 @@ private:
     std::map<AbstractDomain::Location, const ObjVar*> objects_;
     std::map<const ObjVar*, AbstractDomain::Variable> contentVariables_;
     std::vector<const ObjVar*> contentObjectsByVariableId_;
-    AbstractDomain::VariableEnvironment globalEnvironment_;
-    AbstractDomain::VariableEnvironment scalarEnvironment_;
     AbstractDomain::MemoryLayout memoryLayout_;
 };
 

@@ -13,7 +13,6 @@
 #include <map>
 #include <memory>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -115,8 +114,7 @@ public:
     BoxProgramState(BoxDomain numerical, MemoryLayout memoryLayout)
         : numerical_(std::move(numerical)),
           memoryLayout_(std::move(memoryLayout)),
-          addresses_(AddressDomain::top(numerical_.environment())),
-          lifetimes_(LifetimeDomain::bottom())
+          addresses_(AddressDomain::top()), lifetimes_(LifetimeDomain::bottom())
     {
     }
 
@@ -126,9 +124,6 @@ public:
           memoryLayout_(std::move(memoryLayout)),
           addresses_(std::move(addresses)), lifetimes_(std::move(lifetimes))
     {
-        if (addresses_.environment() != numerical_.environment())
-            throw std::invalid_argument(
-                "product components use different environments");
     }
 
     DomainKind kind() const noexcept override
@@ -202,13 +197,6 @@ public:
     void assume(const LinearConstraint& constraint)
     {
         numerical_.assume(constraint);
-    }
-
-    void changeEnvironment(const VariableEnvironment& environment,
-                           bool initializeNewVariablesToZero = false)
-    {
-        numerical_.changeEnvironment(environment, initializeNewVariablesToZero);
-        addresses_.changeEnvironment(environment);
     }
 
     void load(Variable target, Variable pointer)
@@ -316,7 +304,6 @@ private:
                                   ? &static_cast<const BoxProgramState&>(other)
                                   : nullptr;
         return product && memoryLayout_ == product->memoryLayout_ &&
-               numerical_.environment() == product->numerical_.environment() &&
                numerical_.config().operationCompatible(
                    product->numerical_.config());
     }
@@ -379,7 +366,7 @@ private:
 
     bool isBottomDomain() const override
     {
-        return numerical_.isBottom();
+        return numerical_.isBottom() || addresses_.isBottom();
     }
 
     bool isTopDomain() const override

@@ -153,18 +153,16 @@ const ObjVar* DenseAbstractInterpretation::objectAt(AD::Location location) const
     return location.isNull() ? nullptr : &adapter_.object(location);
 }
 
-DenseAbstractInterpretation::DenseState
-DenseAbstractInterpretation::topState() const
+DenseAbstractInterpretation::DenseState DenseAbstractInterpretation::topState()
+    const
 {
-    return DenseState(AD::BoxDomain::top(adapter_.environment()),
-                      adapter_.memoryLayout());
+    return DenseState(AD::BoxDomain::top(), adapter_.memoryLayout());
 }
 
-DenseAbstractInterpretation::DenseState
-DenseAbstractInterpretation::bottomState() const
+DenseAbstractInterpretation::DenseState DenseAbstractInterpretation::
+    bottomState() const
 {
-    return DenseState(AD::BoxDomain::bottom(adapter_.environment()),
-                      adapter_.memoryLayout());
+    return DenseState(AD::BoxDomain::bottom(), adapter_.memoryLayout());
 }
 
 DenseAbstractInterpretation::DenseState& DenseAbstractInterpretation::
@@ -316,8 +314,6 @@ void DenseAbstractInterpretation::materializeValue(DenseState&, const ValVar*,
 void DenseAbstractInterpretation::forgetValue(DenseState& denseState,
                                               AD::Variable variable) const
 {
-    if (!denseState.numerical().environment().contains(variable))
-        return;
     denseState.numerical().forget(variable);
     denseState.addresses().forget(variable);
 }

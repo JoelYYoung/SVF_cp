@@ -9,7 +9,6 @@
 
 #include <limits>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
 namespace SVF
@@ -17,10 +16,7 @@ namespace SVF
 
 using AbstractDomain::Location;
 using AbstractDomain::MemoryLayout;
-using AbstractDomain::NumericType;
 using AbstractDomain::Variable;
-using AbstractDomain::VariableDeclaration;
-using AbstractDomain::VariableEnvironment;
 
 namespace
 {
@@ -45,8 +41,6 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
 {
     std::uint64_t nextVariableId = 1;
     std::uint64_t nextLocationId = 1;
-    std::vector<VariableDeclaration> commonDeclarations;
-    std::vector<VariableDeclaration> allScalarDeclarations;
     std::map<Location, Variable> cells;
 
     for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
@@ -64,11 +58,6 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
             variables_.emplace(value, variable);
             valuesByVariableId_.resize(variable.id() + 1);
             valuesByVariableId_[variable.id()] = value;
-            VariableDeclaration declaration{variable, NumericType::integer(),
-                                            "svf_value_" +
-                                                std::to_string(value->getId())};
-            allScalarDeclarations.push_back(declaration);
-            commonDeclarations.push_back(std::move(declaration));
             continue;
         }
 
@@ -82,21 +71,10 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
         contentVariables_.emplace(object, content);
         contentObjectsByVariableId_.resize(content.id() + 1);
         contentObjectsByVariableId_[content.id()] = object;
-        VariableDeclaration declaration{
-            content, NumericType::integer(),
-            "svf_object_" + std::to_string(object->getId()) + "_content"};
-        commonDeclarations.push_back(std::move(declaration));
         cells.emplace(location, content);
     }
 
-    globalEnvironment_ = VariableEnvironment(commonDeclarations);
-    scalarEnvironment_ = VariableEnvironment(allScalarDeclarations);
     memoryLayout_ = MemoryLayout(std::move(cells));
-}
-
-const VariableEnvironment& SVFIRAdapter::scalarEnvironment() const
-{
-    return scalarEnvironment_;
 }
 
 bool SVFIRAdapter::contains(const ValVar& value) const
@@ -162,11 +140,6 @@ const ObjVar& SVFIRAdapter::object(Location location) const
     if (iterator == objects_.end())
         throw std::invalid_argument("location is not tracked by this adapter");
     return *iterator->second;
-}
-
-const VariableEnvironment& SVFIRAdapter::environment() const
-{
-    return globalEnvironment_;
 }
 
 } // namespace SVF

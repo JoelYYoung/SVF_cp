@@ -88,12 +88,10 @@ void validateProjection(const SVFIR& graph, AbstractInterpretation& analysis)
         const AD::Interval projected = analysis.getInterval(scalar, node);
         const BoxProgramState& state = stateForValue(analysis, scalar, node);
         lastProjection = projected.toString();
-        if (state.numerical().environment().contains(variable))
-            lastStored = state.numerical().bound(variable).toString();
+        const AD::Interval stored = state.numerical().bound(variable);
+        lastStored = stored.toString();
         if (hasFiniteBounds(projected, expectedLower, expectedUpper) &&
-            state.numerical().environment().contains(variable) &&
-            hasFiniteBounds(state.numerical().bound(variable), expectedLower,
-                            expectedUpper))
+            hasFiniteBounds(stored, expectedLower, expectedUpper))
             observed = true;
     }
     if (!observed)
@@ -146,8 +144,8 @@ void validateConservativeUnknownCasts(const SVFIR& graph,
         sawUnknownPointer |=
             analysis.getAddressSet(unknownPointer, node).isTop();
         const AD::AddressSet nulls = analysis.getAddressSet(nullPointer, node);
-        sawNullPointer |= nulls.isSingleton() &&
-                          nulls.contains(AD::Location::null());
+        sawNullPointer |=
+            nulls.isSingleton() && nulls.contains(AD::Location::null());
     }
     if (!sawUnknownInteger || !sawUnknownPointer || !sawNullPointer)
         throw std::runtime_error(

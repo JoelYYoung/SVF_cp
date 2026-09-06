@@ -77,7 +77,8 @@ Rational Rational::fromRaw(const mpq_class& value)
 Rational Rational::fromDouble(double value)
 {
     if (!std::isfinite(value))
-        throw std::invalid_argument("a non-finite floating value is not rational");
+        throw std::invalid_argument(
+            "a non-finite floating value is not rational");
     mpq_class rational;
     mpq_set_d(rational.get_mpq_t(), value);
     rational.canonicalize();
@@ -636,7 +637,7 @@ namespace
 
 constexpr std::array<std::uint8_t, 8> RawMagic{'S', 'V', 'F', 'A',
                                                'D', 'R', 'A', 'W'};
-constexpr std::uint16_t RawVersion = 1;
+constexpr std::uint16_t RawVersion = 2;
 constexpr std::uint32_t MaxCollectionEntries = 1U << 20;
 constexpr std::uint64_t FnvOffset = 14695981039346656037ULL;
 constexpr std::uint64_t FnvPrime = 1099511628211ULL;
@@ -887,38 +888,22 @@ std::uint8_t configurationFlags(const NumericalDomain& state, DomainTag tag)
     throw std::logic_error("unknown raw state domain tag");
 }
 
-void writeEnvironment(Writer& writer, const VariableEnvironment& environment)
+void writeVariable(Writer& writer, Variable variable)
 {
-    if (environment.size() > std::numeric_limits<std::uint32_t>::max())
-        throw std::length_error("raw state environment is too large");
-    writer.writeU32(static_cast<std::uint32_t>(environment.size()));
-    for (const VariableDeclaration& declaration : environment.variables())
-    {
-        writer.writeU32(declaration.variable.id());
-        writer.writeByte(encodeKind(declaration.type.kind));
-        writer.writeU32(declaration.type.floatFormat.exponentBits);
-        writer.writeU32(declaration.type.floatFormat.significandBits);
-        writer.writeString(declaration.name);
-    }
+    writer.writeU32(variable.id());
+    writer.writeByte(encodeKind(variable.type().kind));
+    writer.writeU32(variable.type().floatFormat.exponentBits);
+    writer.writeU32(variable.type().floatFormat.significandBits);
 }
 
-VariableEnvironment readEnvironment(Reader& reader)
+Variable readVariable(Reader& reader)
 {
-    const std::uint32_t count = reader.readU32();
-    if (count > MaxCollectionEntries)
-        throw std::invalid_argument("raw state environment is too large");
-    std::vector<VariableDeclaration> declarations;
-    declarations.reserve(count);
-    for (std::uint32_t index = 0; index < count; ++index)
-    {
-        const Variable variable(reader.readU32());
-        NumericType type;
-        type.kind = decodeKind(reader.readByte());
-        type.floatFormat.exponentBits = reader.readU32();
-        type.floatFormat.significandBits = reader.readU32();
-        declarations.push_back({variable, type, reader.readString()});
-    }
-    return VariableEnvironment(std::move(declarations));
+    const std::uint32_t id = reader.readU32();
+    NumericType type;
+    type.kind = decodeKind(reader.readByte());
+    type.floatFormat.exponentBits = reader.readU32();
+    type.floatFormat.significandBits = reader.readU32();
+    return Variable(id, type);
 }
 
 void writeConstraints(Writer& writer, const LinearConstraintSet& constraints)
@@ -936,7 +921,7 @@ void writeConstraints(Writer& writer, const LinearConstraintSet& constraints)
         writer.writeU32(static_cast<std::uint32_t>(terms.size()));
         for (const auto& [variable, coefficient] : terms)
         {
-            writer.writeU32(variable.id());
+            writeVariable(writer, variable);
             writer.writeString(coefficient.toString());
         }
     }
@@ -963,8 +948,7 @@ Rational readRational(Reader& reader)
     }
 }
 
-LinearConstraintSet readConstraints(Reader& reader,
-                                    const VariableEnvironment& environment)
+LinearConstraintSet readConstraints(Reader& reader)
 {
     const std::uint32_t count = reader.readU32();
     if (count > MaxCollectionEntries)
@@ -976,16 +960,12 @@ LinearConstraintSet readConstraints(Reader& reader,
         const ConstraintKind kind = decodeConstraintKind(reader.readByte());
         LinearExpression expression(readRational(reader));
         const std::uint32_t termCount = reader.readU32();
-        if (termCount > environment.size())
-            throw std::invalid_argument(
-                "raw state constraint has too many terms");
+        if (termCount > MaxCollectionEntries)
+            throw std::invalid_argument("raw state has too many terms");
         std::set<Variable> seen;
         for (std::uint32_t term = 0; term < termCount; ++term)
         {
-            const Variable variable(reader.readU32());
-            if (!environment.contains(variable))
-                throw std::invalid_argument(
-                    "raw state constraint uses an unknown variable");
+            const Variable variable = readVariable(reader);
             if (!seen.insert(variable).second)
                 throw std::invalid_argument(
                     "raw state constraint repeats a variable");
@@ -1008,7 +988,6 @@ DomainTag decodeDomainTag(std::uint8_t value)
 }
 
 std::unique_ptr<NumericalDomain> restore(DomainTag tag, std::uint8_t flags,
-                                         const VariableEnvironment& environment,
                                          bool bottom,
                                          const LinearConstraintSet& constraints)
 {
@@ -1019,10 +998,9 @@ std::unique_ptr<NumericalDomain> restore(DomainTag tag, std::uint8_t flags,
             throw std::invalid_argument("raw Box state has invalid flags");
         BoxSemanticConfig config;
         config.integerTightening = (flags & 1U) != 0;
-        BoxDomain state =
-            bottom
-                ? BoxDomain::bottom(environment, config)
-                : BoxDomain::fromConstraints(environment, constraints, config);
+        BoxDomain state = bottom
+                              ? BoxDomain::bottom(config)
+                              : BoxDomain::fromConstraints(constraints, config);
         return std::make_unique<BoxDomain>(std::move(state));
     }
     }
@@ -1425,13 +1403,9 @@ Interval evaluateTree(const NumericalDomain& state,
         return castInterval(Interval::singleton(expression.constant()),
                             expression.type(), expression.roundingMode());
     case TreeExpression::Kind::Variable:
-        if (!state.environment().contains(expression.variable()))
+        if (expression.variable().type() != expression.type())
             throw std::invalid_argument(
-                "tree expression uses an unknown variable");
-        if (state.environment().typeOf(expression.variable()) !=
-            expression.type())
-            throw std::invalid_argument(
-                "tree variable type does not match environment");
+                "tree variable type does not match its stable identity");
         return state.bound(expression.variable());
     case TreeExpression::Kind::Unary: {
         const Interval operand = evaluateTree(state, expression.lhs());
@@ -1878,107 +1852,6 @@ Interval greaterEqual(const Interval& lhs, const Interval& rhs)
     return lessEqual(rhs, lhs);
 }
 
-void NumericalDomain::assignParallel(const LinearAssignmentList& assignments)
-{
-    if (assignments.empty())
-    {
-        recordOperation(OperationKind::Assignment, ApproximationKind::Exact,
-                        true);
-        return;
-    }
-
-    const VariableEnvironment originalEnvironment = environment();
-    std::set<Variable> targets;
-    for (const LinearAssignment& assignment : assignments)
-    {
-        if (!originalEnvironment.contains(assignment.target))
-            throw std::invalid_argument(
-                "parallel assignment target is not in environment");
-        if (!targets.insert(assignment.target).second)
-            throw std::invalid_argument(
-                "parallel assignment contains a duplicate target");
-        for (const auto& [variable, coefficient] :
-             assignment.expression.terms())
-        {
-            (void)coefficient;
-            if (!originalEnvironment.contains(variable))
-                throw std::invalid_argument(
-                    "parallel assignment expression uses an unknown variable");
-        }
-    }
-    if (isBottom())
-    {
-        recordOperation(OperationKind::Assignment, ApproximationKind::Exact,
-                        true);
-        return;
-    }
-
-    ApproximationKind approximation = ApproximationKind::Exact;
-    bool best = true;
-    std::string reason;
-    const auto includeLastOperation = [&]() {
-        const OperationMetadata& metadata = lastOperation();
-        if (metadata.approximation == ApproximationKind::UnsupportedFallback ||
-            (metadata.approximation ==
-                 ApproximationKind::SoundOverApproximation &&
-             approximation == ApproximationKind::Exact))
-            approximation = metadata.approximation;
-        best = best && metadata.best;
-        if (metadata.approximation != ApproximationKind::Exact &&
-            !metadata.reason.empty())
-            reason = metadata.reason;
-    };
-
-    std::uint64_t nextId = 0;
-    for (const VariableDeclaration& declaration :
-         originalEnvironment.variables())
-        nextId = std::max(
-            nextId, static_cast<std::uint64_t>(declaration.variable.id()) + 1);
-    if (nextId + assignments.size() >
-        static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) +
-            1)
-        throw std::overflow_error(
-            "not enough temporary variable IDs for parallel assignment");
-
-    std::map<Variable, Variable> oldValues;
-    std::vector<VariableDeclaration> temporaries;
-    temporaries.reserve(assignments.size());
-    for (const LinearAssignment& assignment : assignments)
-    {
-        const Variable temporary(static_cast<std::uint32_t>(nextId++));
-        oldValues.emplace(assignment.target, temporary);
-        temporaries.push_back(
-            {temporary, originalEnvironment.typeOf(assignment.target),
-             "$parallel_old_" + originalEnvironment.nameOf(assignment.target)});
-    }
-
-    changeEnvironment(originalEnvironment.add(std::move(temporaries)));
-    for (const auto& [target, temporary] : oldValues)
-    {
-        assign(temporary, LinearExpression(target));
-        includeLastOperation();
-    }
-
-    for (const LinearAssignment& assignment : assignments)
-    {
-        LinearExpression rewritten(assignment.expression.constant());
-        for (const auto& [variable, coefficient] :
-             assignment.expression.terms())
-        {
-            const auto old = oldValues.find(variable);
-            const Variable source =
-                old == oldValues.end() ? variable : old->second;
-            rewritten.setCoefficient(source, rewritten.coefficient(source) +
-                                                 coefficient);
-        }
-        assign(assignment.target, rewritten);
-        includeLastOperation();
-    }
-    changeEnvironment(originalEnvironment);
-    recordOperation(OperationKind::Assignment, approximation, best,
-                    std::move(reason));
-}
-
 void NumericalDomain::assignParallel(const TreeAssignmentList& assignments)
 {
     std::set<Variable> targets;
@@ -1988,9 +1861,6 @@ void NumericalDomain::assignParallel(const TreeAssignmentList& assignments)
     intervalized.reserve(assignments.size());
     for (const TreeAssignment& assignment : assignments)
     {
-        if (!environment().contains(assignment.target))
-            throw std::invalid_argument(
-                "parallel tree assignment target is not in environment");
         if (!targets.insert(assignment.target).second)
             throw std::invalid_argument(
                 "parallel tree assignment contains a duplicate target");
@@ -2031,11 +1901,18 @@ void NumericalDomain::assumeAll(const LinearConstraintSet& constraints)
         return;
     }
 
-    // One pass per constraint and dimension bounds any propagation chain that
+    // One pass per constraint and variable bounds any propagation chain that
     // terminates at all; the equivalence test stops earlier in practice, and
     // immediately for a domain that is exact on linear constraints.
-    const std::size_t limit =
-        constraints.size() * (environment().size() + 1) + 1;
+    std::set<Variable> variables;
+    for (const LinearConstraint& constraint : constraints)
+        for (const auto& [variable, coefficient] :
+             constraint.expression().terms())
+        {
+            (void)coefficient;
+            variables.insert(variable);
+        }
+    const std::size_t limit = constraints.size() * (variables.size() + 1) + 1;
     for (std::size_t pass = 0; pass < limit; ++pass)
     {
         const std::unique_ptr<AbstractDomain> before = clone();
@@ -2054,7 +1931,6 @@ NumericalDomain::RawBuffer NumericalDomain::serializeRaw() const
     const DomainTag tag = domainTag(*this);
     writer.writeByte(static_cast<std::uint8_t>(tag));
     writer.writeByte(configurationFlags(*this, tag));
-    writeEnvironment(writer, environment());
     writer.writeByte(isBottom() ? 1U : 0U);
     writeConstraints(writer, canonicalConstraints(*this, tag));
     return writer.finish();
@@ -2086,9 +1962,6 @@ void NumericalDomain::substituteParallel(const TreeAssignmentList& assignments)
     unsupported.reserve(assignments.size());
     for (const TreeAssignment& assignment : assignments)
     {
-        if (!environment().contains(assignment.target))
-            throw std::invalid_argument(
-                "parallel substitution target is not in environment");
         if (!targets.insert(assignment.target).second)
             throw std::invalid_argument(
                 "parallel substitution contains a duplicate target");
@@ -2099,7 +1972,7 @@ void NumericalDomain::substituteParallel(const TreeAssignmentList& assignments)
             unsupported.push_back(assignment.target);
     }
 
-    // Unknown output dimensions are existentially projected before the
+    // Unknown output variables are existentially projected before the
     // remaining simultaneous affine preimage is formed.
     for (Variable target : unsupported)
         forget(target);
@@ -2213,8 +2086,6 @@ LinearConstraintSet NumericalDomain::treeConstraintConsequences(
 
 void NumericalDomain::assignInterval(Variable target, const Interval& value)
 {
-    if (!environment().contains(target))
-        throw std::invalid_argument("assignment target is not in environment");
     if (isBottom())
         return;
     forget(target);
@@ -2245,15 +2116,6 @@ void NumericalDomain::recordOperation(OperationKind operation,
                       std::move(reason)};
 }
 
-VariableEnvironment NumericalDomain::unifyEnvironmentWith(
-    NumericalDomain& other, bool initializeNewVariablesToZero)
-{
-    const VariableEnvironment merged = environment().merge(other.environment());
-    changeEnvironment(merged, initializeNewVariablesToZero);
-    other.changeEnvironment(merged, initializeNewVariablesToZero);
-    return merged;
-}
-
 std::uint64_t NumericalDomain::hash() const
 {
     const RawBuffer raw = serializeRaw();
@@ -2269,18 +2131,16 @@ std::unique_ptr<NumericalDomain> NumericalDomain::deserializeRaw(
         throw std::invalid_argument("raw state has an unsupported version");
     const DomainTag tag = decodeDomainTag(reader.readByte());
     const std::uint8_t flags = reader.readByte();
-    const VariableEnvironment environment = readEnvironment(reader);
     const std::uint8_t bottomByte = reader.readByte();
     if (bottomByte > 1)
         throw std::invalid_argument("raw state has an invalid bottom flag");
-    const LinearConstraintSet constraints =
-        readConstraints(reader, environment);
+    const LinearConstraintSet constraints = readConstraints(reader);
     if (!reader.empty())
         throw std::invalid_argument("raw state has trailing data");
     if (bottomByte != 0 && !constraints.empty())
         throw std::invalid_argument(
             "raw bottom state unexpectedly contains constraints");
-    return restore(tag, flags, environment, bottomByte != 0, constraints);
+    return restore(tag, flags, bottomByte != 0, constraints);
 }
 
 namespace
@@ -2403,39 +2263,33 @@ LinearConstraint normalizedLessEqual(const LinearConstraint& constraint,
 
 } // namespace
 
-BoxDomain::BoxDomain(VariableEnvironment environment, BoxSemanticConfig config,
-                     bool bottom)
-    : environment_(std::move(environment)), config_(std::move(config)),
-      bottom_(bottom)
+BoxDomain::BoxDomain(BoxSemanticConfig config, bool bottom)
+    : config_(std::move(config)), bottom_(bottom)
 {
 }
 
 BoxDomain::BoxDomain(const BoxDomain& other)
-    : NumericalDomain(other), environment_(other.environment_),
-      config_(other.config_), boundPages_(other.boundPages_),
-      bottom_(other.bottom_)
+    : NumericalDomain(other), config_(other.config_),
+      boundPages_(other.boundPages_), bottom_(other.bottom_)
 {
 }
 
-BoxDomain BoxDomain::top(const VariableEnvironment& environment,
-                         const BoxSemanticConfig& config)
+BoxDomain BoxDomain::top(const BoxSemanticConfig& config)
 {
-    BoxDomain result(environment, config, false);
+    BoxDomain result(config, false);
     return result;
 }
 
-BoxDomain BoxDomain::bottom(const VariableEnvironment& environment,
-                            const BoxSemanticConfig& config)
+BoxDomain BoxDomain::bottom(const BoxSemanticConfig& config)
 {
-    BoxDomain result(environment, config, true);
+    BoxDomain result(config, true);
     return result;
 }
 
-BoxDomain BoxDomain::fromConstraints(const VariableEnvironment& environment,
-                                     const LinearConstraintSet& constraints,
+BoxDomain BoxDomain::fromConstraints(const LinearConstraintSet& constraints,
                                      const BoxSemanticConfig& config)
 {
-    BoxDomain result = top(environment, config);
+    BoxDomain result = top(config);
     result.assumeAll(constraints);
     return result;
 }
@@ -2447,19 +2301,10 @@ std::unique_ptr<AbstractDomain> BoxDomain::clone() const
 
 void BoxDomain::assign(Variable target, const LinearExpression& expression)
 {
-    if (!environment_.contains(target))
-        throw std::invalid_argument("assignment target is not in environment");
-    for (const auto& [variable, coefficient] : expression.terms())
-    {
-        (void)coefficient;
-        if (!environment_.contains(variable))
-            throw std::invalid_argument(
-                "assignment expression uses an unknown variable");
-    }
     recordOperation(OperationKind::Assignment, ApproximationKind::Exact, true);
     if (bottom_)
         return;
-    setBound(environment_.dimensionOf(target), evaluate(*this, expression));
+    setBound(target, evaluate(*this, expression));
 }
 
 void BoxDomain::assign(Variable target, const TreeExpression& expression)
@@ -2472,7 +2317,7 @@ void BoxDomain::assign(Variable target, const TreeExpression& expression)
     }
     const Interval value = evaluateTreeExpression(expression);
     if (!bottom_)
-        setBound(environment_.dimensionOf(target), value);
+        setBound(target, value);
     report(OperationKind::Assignment, ApproximationKind::SoundOverApproximation,
            "nonlinear or finite IEEE assignment was interval-linearized",
            false);
@@ -2483,32 +2328,21 @@ void BoxDomain::assignParallel(const LinearAssignmentList& assignments)
     std::set<Variable> targets;
     for (const LinearAssignment& assignment : assignments)
     {
-        if (!environment_.contains(assignment.target))
-            throw std::invalid_argument(
-                "parallel assignment target is not in environment");
         if (!targets.insert(assignment.target).second)
             throw std::invalid_argument(
                 "parallel assignment contains a duplicate target");
-        for (const auto& [variable, coefficient] :
-             assignment.expression.terms())
-        {
-            (void)coefficient;
-            if (!environment_.contains(variable))
-                throw std::invalid_argument(
-                    "parallel assignment expression uses an unknown variable");
-        }
     }
     recordOperation(OperationKind::Assignment, ApproximationKind::Exact, true);
     if (bottom_)
         return;
 
-    std::vector<std::pair<Dimension, Interval>> updates;
+    std::vector<std::pair<Variable, Interval>> updates;
     updates.reserve(assignments.size());
     for (const LinearAssignment& assignment : assignments)
-        updates.emplace_back(environment_.dimensionOf(assignment.target),
+        updates.emplace_back(assignment.target,
                              evaluate(*this, assignment.expression));
-    for (auto& [dimension, value] : updates)
-        setBound(dimension, std::move(value));
+    for (auto& [variable, value] : updates)
+        setBound(variable, std::move(value));
 }
 
 void BoxDomain::substitute(Variable target, const LinearExpression& expression)
@@ -2521,21 +2355,10 @@ void BoxDomain::substituteParallel(const LinearAssignmentList& assignments)
     std::map<Variable, LinearExpression> replacements;
     for (const LinearAssignment& assignment : assignments)
     {
-        if (!environment_.contains(assignment.target))
-            throw std::invalid_argument(
-                "substitution target is not in environment");
         if (!replacements.emplace(assignment.target, assignment.expression)
                  .second)
             throw std::invalid_argument(
                 "parallel substitution contains a duplicate target");
-        for (const auto& [variable, coefficient] :
-             assignment.expression.terms())
-        {
-            (void)coefficient;
-            if (!environment_.contains(variable))
-                throw std::invalid_argument(
-                    "substitution expression uses an unknown variable");
-        }
     }
     recordOperation(OperationKind::Substitution, ApproximationKind::Exact,
                     true);
@@ -2546,7 +2369,7 @@ void BoxDomain::substituteParallel(const LinearAssignmentList& assignments)
     for (const LinearConstraint& constraint : toConstraints())
         preimage.emplace_back(constraint.expression().substituted(replacements),
                               constraint.kind());
-    *this = fromConstraints(environment_, preimage, config_);
+    *this = fromConstraints(preimage, config_);
 }
 
 void BoxDomain::assume(const LinearConstraint& constraint)
@@ -2554,13 +2377,6 @@ void BoxDomain::assume(const LinearConstraint& constraint)
     recordOperation(OperationKind::Assumption, ApproximationKind::Exact, true);
     if (bottom_)
         return;
-    for (const auto& [variable, coefficient] : constraint.expression().terms())
-    {
-        (void)coefficient;
-        if (!environment_.contains(variable))
-            throw std::invalid_argument("constraint uses an unknown variable");
-    }
-
     if (constraint.kind() == ConstraintKind::NotEqual)
     {
         const Interval value = evaluate(*this, constraint.expression());
@@ -2586,9 +2402,9 @@ void BoxDomain::assume(const LinearConstraint& constraint)
     const LinearConstraint normalized = normalizedLessEqual(constraint, strict);
     const LinearExpression& expression = normalized.expression();
 
-    // Repeating interval propagation lets bounds inferred for one dimension
+    // Repeating interval propagation lets bounds inferred for one variable
     // tighten another without introducing an unbounded worklist.
-    for (std::size_t pass = 0; pass <= environment_.size(); ++pass)
+    for (std::size_t pass = 0; pass <= expression.terms().size(); ++pass)
     {
         bool changed = false;
         for (const auto& [variable, coefficient] : expression.terms())
@@ -2601,8 +2417,7 @@ void BoxDomain::assume(const LinearConstraint& constraint)
 
             const Rational rhs = -rest.lower().value() / coefficient;
             const bool resultStrict = strict || rest.lower().isStrict();
-            const Dimension dimension = environment_.dimensionOf(variable);
-            Interval next = boundAt(dimension);
+            Interval next = boundAt(variable);
             if (coefficient.sign() > 0)
             {
                 next = meetIntervals(
@@ -2615,13 +2430,13 @@ void BoxDomain::assume(const LinearConstraint& constraint)
                                      Interval(Bound::finite(rhs, resultStrict),
                                               Bound::plusInfinity()));
             }
-            const Interval previous = boundAt(dimension);
-            setBound(dimension, next);
+            const Interval previous = boundAt(variable);
+            setBound(variable, next);
             if (bottom_)
                 return;
             changed = changed ||
-                      !intervalIncluded(previous, boundAt(dimension)) ||
-                      !intervalIncluded(boundAt(dimension), previous);
+                      !intervalIncluded(previous, boundAt(variable)) ||
+                      !intervalIncluded(boundAt(variable), previous);
         }
         if (!changed)
             break;
@@ -2657,10 +2472,8 @@ void BoxDomain::assume(const TreeConstraint& constraint)
 
 void BoxDomain::forget(Variable variable)
 {
-    if (!environment_.contains(variable))
-        throw std::invalid_argument("forgotten variable is not in environment");
     if (!bottom_)
-        eraseBound(environment_.dimensionOf(variable));
+        eraseBound(variable);
     recordOperation(OperationKind::Forget, ApproximationKind::Exact, true);
 }
 
@@ -2669,72 +2482,18 @@ std::vector<Variable> BoxDomain::constrainedVariables() const
     std::vector<Variable> variables;
     if (bottom_)
         return variables;
-    const std::vector<Dimension> dimensions = boundedDimensions();
-    variables.reserve(dimensions.size());
-    for (Dimension dimension : dimensions)
-        variables.push_back(environment_.variableOf(dimension));
-    return variables;
+    return boundedVariables();
 }
 
-void BoxDomain::changeEnvironment(const VariableEnvironment& environment,
-                                  bool initializeNewVariablesToZero)
+void BoxDomain::expand(Variable source, const std::vector<Variable>& copies)
 {
-    if (environment_ == environment)
-    {
-        recordOperation(OperationKind::EnvironmentChange,
-                        ApproximationKind::Exact, true);
-        return;
-    }
-    for (const VariableDeclaration& declaration : environment.variables())
-    {
-        if (environment_.contains(declaration.variable) &&
-            environment_.typeOf(declaration.variable) != declaration.type)
-            throw std::invalid_argument(
-                "environment change modifies a variable's numeric type");
-    }
-    BoxDomain next = BoxDomain::top(environment, config_);
-    if (bottom_)
-        next.makeBottom();
-    else
-    {
-        for (Dimension oldDimension : boundedDimensions())
-        {
-            const Variable variable = environment_.variableOf(oldDimension);
-            if (environment.contains(variable))
-                next.setBound(environment.dimensionOf(variable),
-                              boundAt(oldDimension));
-        }
-        if (initializeNewVariablesToZero)
-        {
-            for (const VariableDeclaration& declaration :
-                 environment.variables())
-            {
-                if (!environment_.contains(declaration.variable))
-                    next.setBound(environment.dimensionOf(declaration.variable),
-                                  Interval::singleton(Rational()));
-            }
-        }
-    }
-    environment_ = std::move(next.environment_);
-    boundPages_ = std::move(next.boundPages_);
-    bottom_ = next.bottom_;
-    recordOperation(OperationKind::EnvironmentChange, ApproximationKind::Exact,
-                    true);
-}
-
-void BoxDomain::expand(Variable source,
-                       const std::vector<VariableDeclaration>& copies)
-{
-    if (!environment_.contains(source))
-        throw std::invalid_argument("expanded variable is not in environment");
     std::set<Variable> seen;
-    for (const VariableDeclaration& copy : copies)
+    for (Variable copy : copies)
     {
-        if (environment_.contains(copy.variable) ||
-            !seen.insert(copy.variable).second)
+        if (copy == source || !seen.insert(copy).second)
             throw std::invalid_argument(
-                "expanded variables must be new and unique");
-        if (copy.type != environment_.typeOf(source))
+                "expanded variables must be distinct from the source");
+        if (copy.type() != source.type())
             throw std::invalid_argument(
                 "expanded variables must have the source numeric type");
     }
@@ -2744,26 +2503,22 @@ void BoxDomain::expand(Variable source,
         return;
     }
     const Interval sourceValue = bound(source);
-    changeEnvironment(environment_.add(copies));
-    for (const VariableDeclaration& copy : copies)
+    for (Variable copy : copies)
         if (!bottom_)
-            setBound(environment_.dimensionOf(copy.variable), sourceValue);
+            setBound(copy, sourceValue);
     recordOperation(OperationKind::Expand, ApproximationKind::Exact, true);
 }
 
 void BoxDomain::fold(Variable target, const std::vector<Variable>& folded)
 {
-    if (!environment_.contains(target))
-        throw std::invalid_argument("fold target is not in environment");
     std::set<Variable> seen;
     std::vector<Variable> sources{target};
     for (Variable variable : folded)
     {
-        if (variable == target || !environment_.contains(variable) ||
-            !seen.insert(variable).second)
+        if (variable == target || !seen.insert(variable).second)
             throw std::invalid_argument(
-                "folded variables must be distinct non-target dimensions");
-        if (environment_.typeOf(variable) != environment_.typeOf(target))
+                "folded variables must be distinct non-target variables");
+        if (variable.type() != target.type())
             throw std::invalid_argument(
                 "folded variables must have the target numeric type");
         sources.push_back(variable);
@@ -2774,15 +2529,16 @@ void BoxDomain::fold(Variable target, const std::vector<Variable>& folded)
         return;
     }
 
-    BoxDomain result = bottom(environment_, config_);
+    BoxDomain result = bottom(config_);
     for (Variable source : sources)
     {
         BoxDomain branch = *this;
         if (source != target)
-            branch.setBound(environment_.dimensionOf(target), bound(source));
+            branch.setBound(target, bound(source));
         result = result.join(branch);
     }
-    result.changeEnvironment(environment_.remove(folded));
+    for (Variable variable : folded)
+        result.forget(variable);
     *this = std::move(result);
     recordOperation(OperationKind::Fold, ApproximationKind::Exact, true);
 }
@@ -2833,22 +2589,13 @@ CheckResult BoxDomain::entails(const LinearConstraint& constraint) const
 
 Interval BoxDomain::bound(Variable variable) const
 {
-    if (!environment_.contains(variable))
-        throw std::invalid_argument("bounded variable is not in environment");
     if (bottom_)
         return Interval(Bound::plusInfinity(), Bound::minusInfinity());
-    return boundAt(environment_.dimensionOf(variable));
+    return boundAt(variable);
 }
 
 Interval BoxDomain::bound(const LinearExpression& expression) const
 {
-    for (const auto& [variable, coefficient] : expression.terms())
-    {
-        (void)coefficient;
-        if (!environment_.contains(variable))
-            throw std::invalid_argument(
-                "bounded expression uses an unknown variable");
-    }
     if (bottom_)
         return Interval(Bound::plusInfinity(), Bound::minusInfinity());
     return evaluate(*this, expression);
@@ -2863,10 +2610,9 @@ LinearConstraintSet BoxDomain::toConstraints() const
                             ConstraintKind::LessEqual);
         return result;
     }
-    for (Dimension dimension : boundedDimensions())
+    for (Variable variable : boundedVariables())
     {
-        const Variable variable = environment_.variableOf(dimension);
-        const Interval& interval = boundAt(dimension);
+        const Interval& interval = boundAt(variable);
         if (interval.lower().isFinite())
         {
             result.emplace_back(LinearExpression(variable) -
@@ -2893,23 +2639,23 @@ void BoxDomain::close()
                     true, "topological closure");
     if (bottom_)
         return;
-    for (Dimension dimension : boundedDimensions())
+    for (Variable variable : boundedVariables())
     {
-        const Interval& interval = boundAt(dimension);
+        const Interval& interval = boundAt(variable);
         const Bound lower = interval.lower().isFinite()
                                 ? Bound::finite(interval.lower().value())
                                 : interval.lower();
         const Bound upper = interval.upper().isFinite()
                                 ? Bound::finite(interval.upper().value())
                                 : interval.upper();
-        setBound(dimension, Interval(lower, upper));
+        setBound(variable, Interval(lower, upper));
     }
 }
 
 void BoxDomain::canonicalize()
 {
-    for (Dimension dimension : boundedDimensions())
-        canonicalize(dimension);
+    for (Variable variable : boundedVariables())
+        canonicalize(variable);
     recordOperation(OperationKind::Canonicalization, ApproximationKind::Exact,
                     true, "canonicalization");
 }
@@ -2954,11 +2700,11 @@ BoxDomain BoxDomain::widen(const BoxDomain& next,
         return result;
     }
     BoxDomain result(*this);
-    for (Dimension dimension : boundedDimensions())
+    for (Variable variable : boundedVariables())
     {
-        Bound lower = boundAt(dimension).lower();
-        Bound upper = boundAt(dimension).upper();
-        const Interval& following = next.boundAt(dimension);
+        Bound lower = boundAt(variable).lower();
+        Bound upper = boundAt(variable).upper();
+        const Interval& following = next.boundAt(variable);
         if (compareLower(following.lower(), lower) < 0)
         {
             lower = Bound::minusInfinity();
@@ -2985,7 +2731,7 @@ BoxDomain BoxDomain::widen(const BoxDomain& next,
                 }
             }
         }
-        result.setBound(dimension, Interval(lower, upper));
+        result.setBound(variable, Interval(lower, upper));
     }
     for (const LinearConstraint& threshold : policy.linearThresholds)
     {
@@ -3003,21 +2749,21 @@ BoxDomain BoxDomain::narrow(const BoxDomain& next) const
     requireBox(next);
     if (bottom_ || next.bottom_)
     {
-        BoxDomain result = bottom(environment_, config_);
+        BoxDomain result = bottom(config_);
         result.recordOperation(OperationKind::Narrowing,
                                ApproximationKind::Exact, true);
         return result;
     }
     BoxDomain result(*this);
-    for (Dimension dimension : next.boundedDimensions())
+    for (Variable variable : next.boundedVariables())
     {
-        Bound lower = boundAt(dimension).lower();
-        Bound upper = boundAt(dimension).upper();
+        Bound lower = boundAt(variable).lower();
+        Bound upper = boundAt(variable).upper();
         if (lower.isMinusInfinity())
-            lower = next.boundAt(dimension).lower();
+            lower = next.boundAt(variable).lower();
         if (upper.isPlusInfinity())
-            upper = next.boundAt(dimension).upper();
-        result.setBound(dimension, Interval(lower, upper));
+            upper = next.boundAt(variable).upper();
+        result.setBound(variable, Interval(lower, upper));
     }
     result.recordOperation(OperationKind::Narrowing, ApproximationKind::Exact,
                            true);
@@ -3029,8 +2775,7 @@ bool BoxDomain::hasCompatibleDomain(const AbstractDomain& other) const
     const auto* box = other.isDomain<BoxDomain>()
                           ? &static_cast<const BoxDomain&>(other)
                           : nullptr;
-    return box && environment_ == box->environment_ &&
-           config_.operationCompatible(box->config_);
+    return box && config_.operationCompatible(box->config_);
 }
 
 void BoxDomain::joinDomain(const AbstractDomain& other)
@@ -3043,9 +2788,9 @@ void BoxDomain::joinDomain(const AbstractDomain& other)
         *this = box;
         return;
     }
-    for (Dimension dimension : boundedDimensions())
-        setBound(dimension,
-                 joinIntervals(boundAt(dimension), box.boundAt(dimension)));
+    for (Variable variable : boundedVariables())
+        setBound(variable,
+                 joinIntervals(boundAt(variable), box.boundAt(variable)));
 }
 
 void BoxDomain::meetDomain(const AbstractDomain& other)
@@ -3056,10 +2801,10 @@ void BoxDomain::meetDomain(const AbstractDomain& other)
         makeBottom();
         return;
     }
-    for (Dimension dimension : box.boundedDimensions())
+    for (Variable variable : box.boundedVariables())
     {
-        setBound(dimension,
-                 meetIntervals(boundAt(dimension), box.boundAt(dimension)));
+        setBound(variable,
+                 meetIntervals(boundAt(variable), box.boundAt(variable)));
         if (bottom_)
             return;
     }
@@ -3109,9 +2854,9 @@ bool BoxDomain::leqDomain(const AbstractDomain& other) const
         return true;
     if (box.bottom_)
         return false;
-    for (Dimension dimension : box.boundedDimensions())
+    for (Variable variable : box.boundedVariables())
     {
-        if (!intervalIncluded(boundAt(dimension), box.boundAt(dimension)))
+        if (!intervalIncluded(boundAt(variable), box.boundAt(variable)))
             return false;
     }
     return true;
@@ -3123,12 +2868,13 @@ std::string BoxDomain::domainToString() const
         return "bottom";
     std::ostringstream output;
     output << "{";
-    for (Dimension dimension = 0; dimension < environment_.size(); ++dimension)
+    bool first = true;
+    for (Variable variable : boundedVariables())
     {
-        if (dimension != 0)
+        if (!first)
             output << ", ";
-        output << environment_.nameOf(environment_.variableOf(dimension)) << "="
-               << boundAt(dimension).toString();
+        first = false;
+        output << "v" << variable.id() << "=" << boundAt(variable).toString();
     }
     output << "}";
     return output.str();
@@ -3140,14 +2886,13 @@ const BoxDomain& BoxDomain::requireBox(const AbstractDomain& other) const
     return static_cast<const BoxDomain&>(other);
 }
 
-void BoxDomain::canonicalize(Dimension dimension)
+void BoxDomain::canonicalize(Variable variable)
 {
     if (bottom_)
         return;
-    Interval interval = boundAt(dimension);
-    const Variable variable = environment_.variableOf(dimension);
+    Interval interval = boundAt(variable);
     if (config_.integerTightening &&
-        environment_.typeOf(variable).kind == NumericKind::Integer)
+        variable.type().kind == NumericKind::Integer)
     {
         interval = Interval(integerLower(interval.lower()),
                             integerUpper(interval.upper()));
@@ -3158,26 +2903,31 @@ void BoxDomain::canonicalize(Dimension dimension)
         return;
     }
     if (interval.isTop())
-        eraseBound(dimension);
+        eraseBound(variable);
     else
-        writablePage(dimension / BoundsPerPage)
-            .bounds[dimension % BoundsPerPage] = std::move(interval);
+        writablePage(variable.id() / BoundsPerPage)
+            .bounds[variable.id() % BoundsPerPage] =
+            BoundSlot{variable, std::move(interval)};
 }
 
-void BoxDomain::setBound(Dimension dimension, Interval interval)
+void BoxDomain::setBound(Variable variable, Interval interval)
 {
+    // A stable ID denotes one typed variable for the lifetime of an analysis.
+    // Detect accidental ID reuse before touching the physical slot.
+    (void)boundAt(variable);
     if (interval.isTop())
-        eraseBound(dimension);
+        eraseBound(variable);
     else
-        writablePage(dimension / BoundsPerPage)
-            .bounds[dimension % BoundsPerPage] = std::move(interval);
-    canonicalize(dimension);
+        writablePage(variable.id() / BoundsPerPage)
+            .bounds[variable.id() % BoundsPerPage] =
+            BoundSlot{variable, std::move(interval)};
+    canonicalize(variable);
 }
 
-const Interval& BoxDomain::boundAt(Dimension dimension) const
+const Interval& BoxDomain::boundAt(Variable variable) const
 {
     static const Interval top = Interval::top();
-    const std::size_t pageIndex = dimension / BoundsPerPage;
+    const std::size_t pageIndex = variable.id() / BoundsPerPage;
     const auto iterator =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
                          [](const BoundPageEntry& entry, std::size_t index) {
@@ -3185,8 +2935,13 @@ const Interval& BoxDomain::boundAt(Dimension dimension) const
                          });
     if (iterator == boundPages_.end() || iterator->index != pageIndex)
         return top;
-    const auto& slot = iterator->page->bounds[dimension % BoundsPerPage];
-    return slot ? *slot : top;
+    const auto& slot = iterator->page->bounds[variable.id() % BoundsPerPage];
+    if (!slot)
+        return top;
+    if (slot->variable != variable)
+        throw std::invalid_argument(
+            "Variable ID was reused with a different numeric type");
+    return slot->interval;
 }
 
 BoxDomain::BoundPage& BoxDomain::writablePage(std::size_t pageIndex)
@@ -3204,9 +2959,9 @@ BoxDomain::BoundPage& BoxDomain::writablePage(std::size_t pageIndex)
     return *iterator->page;
 }
 
-void BoxDomain::eraseBound(Dimension dimension)
+void BoxDomain::eraseBound(Variable variable)
 {
-    const std::size_t pageIndex = dimension / BoundsPerPage;
+    const std::size_t pageIndex = variable.id() / BoundsPerPage;
     auto existing =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
                          [](const BoundPageEntry& entry, std::size_t index) {
@@ -3214,9 +2969,12 @@ void BoxDomain::eraseBound(Dimension dimension)
                          });
     if (existing == boundPages_.end() || existing->index != pageIndex)
         return;
-    const std::size_t offset = dimension % BoundsPerPage;
+    const std::size_t offset = variable.id() % BoundsPerPage;
     if (!existing->page->bounds[offset])
         return;
+    if (existing->page->bounds[offset]->variable != variable)
+        throw std::invalid_argument(
+            "Variable ID was reused with a different numeric type");
     auto iterator =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
                          [](const BoundPageEntry& entry, std::size_t index) {
@@ -3235,21 +2993,20 @@ bool BoxDomain::pageIsEmpty(const BoundPage& page)
                         [](const auto& bound) { return bound.has_value(); });
 }
 
-std::vector<Dimension> BoxDomain::boundedDimensions() const
+std::vector<Variable> BoxDomain::boundedVariables() const
 {
-    std::vector<Dimension> dimensions;
+    std::vector<Variable> variables;
     for (const BoundPageEntry& entry : boundPages_)
     {
         for (std::size_t offset = 0; offset < BoundsPerPage; ++offset)
         {
-            const Dimension dimension = entry.index * BoundsPerPage + offset;
-            if (dimension >= environment_.size())
-                break;
             if (entry.page->bounds[offset])
-                dimensions.push_back(dimension);
+            {
+                variables.push_back(entry.page->bounds[offset]->variable);
+            }
         }
     }
-    return dimensions;
+    return variables;
 }
 
 void BoxDomain::makeBottom()
