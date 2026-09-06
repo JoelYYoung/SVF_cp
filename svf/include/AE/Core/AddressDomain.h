@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -56,7 +55,7 @@ private:
 class AddressSet
 {
 public:
-    using const_iterator = std::set<Location>::const_iterator;
+    using const_iterator = std::vector<Location>::const_iterator;
 
     AddressSet() = default;
 
@@ -71,7 +70,7 @@ public:
     bool hasIntersection(const AddressSet& other) const;
     std::size_t size() const;
     bool empty() const;
-    const std::set<Location>& locations() const;
+    const std::vector<Location>& locations() const;
     const_iterator begin() const
     {
         return locations().begin();
@@ -100,7 +99,11 @@ private:
     explicit AddressSet(bool top) : top_(top) {}
 
     bool top_ = false;
-    std::set<Location> locations_;
+    /// Sorted, duplicate-free finite support. AE points-to sets are usually
+    /// singletons or otherwise small, so contiguous storage avoids one heap
+    /// allocation and three pointers per pointee while retaining logarithmic
+    /// membership tests and linear set operations.
+    std::vector<Location> locations_;
 };
 
 /// Flow-sensitive address property with finite non-Top support over stable

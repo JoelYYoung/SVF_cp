@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -59,7 +60,8 @@ bool AddressSet::isSingleton() const
 
 bool AddressSet::contains(Location location) const
 {
-    return top_ || locations_.count(location) != 0;
+    return top_ || std::binary_search(locations_.begin(), locations_.end(),
+                                      location);
 }
 
 bool AddressSet::hasIntersection(const AddressSet& other) const
@@ -72,9 +74,9 @@ bool AddressSet::hasIntersection(const AddressSet& other) const
     const auto* larger = &other.locations_;
     if (larger->size() < smaller->size())
         std::swap(smaller, larger);
-    return std::any_of(
-        smaller->begin(), smaller->end(),
-        [&](Location location) { return larger->count(location) != 0; });
+    return std::any_of(smaller->begin(), smaller->end(), [&](Location location) {
+        return std::binary_search(larger->begin(), larger->end(), location);
+    });
 }
 
 std::size_t AddressSet::size() const
@@ -89,7 +91,7 @@ bool AddressSet::empty() const
     return isBottom();
 }
 
-const std::set<Location>& AddressSet::locations() const
+const std::vector<Location>& AddressSet::locations() const
 {
     if (top_)
         throw std::logic_error("top address set has no finite enumeration");
@@ -98,8 +100,12 @@ const std::set<Location>& AddressSet::locations() const
 
 void AddressSet::insert(Location location)
 {
-    if (!top_)
-        locations_.insert(location);
+    if (top_)
+        return;
+    const auto position =
+        std::lower_bound(locations_.begin(), locations_.end(), location);
+    if (position == locations_.end() || *position != location)
+        locations_.insert(position, location);
 }
 
 void AddressSet::joinWith(const AddressSet& other)
@@ -111,7 +117,12 @@ void AddressSet::joinWith(const AddressSet& other)
         *this = top();
         return;
     }
-    locations_.insert(other.locations_.begin(), other.locations_.end());
+    std::vector<Location> joined;
+    joined.reserve(locations_.size() + other.locations_.size());
+    std::set_union(locations_.begin(), locations_.end(),
+                   other.locations_.begin(), other.locations_.end(),
+                   std::back_inserter(joined));
+    locations_ = std::move(joined);
 }
 
 void AddressSet::meetWith(const AddressSet& other)
@@ -123,10 +134,11 @@ void AddressSet::meetWith(const AddressSet& other)
         *this = other;
         return;
     }
-    std::set<Location> intersection;
+    std::vector<Location> intersection;
+    intersection.reserve(std::min(locations_.size(), other.locations_.size()));
     std::set_intersection(locations_.begin(), locations_.end(),
                           other.locations_.begin(), other.locations_.end(),
-                          std::inserter(intersection, intersection.begin()));
+                          std::back_inserter(intersection));
     locations_ = std::move(intersection);
 }
 
