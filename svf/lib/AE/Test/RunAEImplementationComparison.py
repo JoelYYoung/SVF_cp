@@ -189,6 +189,7 @@ def main():
     )
     parser.add_argument("--input", action="append", type=labeled_path, required=True)
     parser.add_argument("--repetitions", type=int, default=3)
+    parser.add_argument("--hash-repetitions", type=int, choices=(0, 1), default=1)
     parser.add_argument("--timeout", type=float, default=86400.0)
     parser.add_argument(
         "--memory-bytes", type=int, default=512 * 1024 * 1024 * 1024
@@ -197,10 +198,16 @@ def main():
     parser.add_argument("--record-differences-output")
     parser.add_argument("--output", required=True)
     options = parser.parse_args()
-    if options.repetitions <= 0 or options.timeout <= 0:
-        parser.error("repetitions and timeout must be positive")
-    if all(selected[4] == "none" for selected in options.candidate):
+    if options.repetitions < 0 or options.timeout <= 0:
+        parser.error("repetitions must be non-negative and timeout positive")
+    if options.repetitions == 0 and options.hash_repetitions == 0:
+        parser.error("at least one hash or performance repetition is required")
+    if options.hash_repetitions and all(
+        selected[4] == "none" for selected in options.candidate
+    ):
         parser.error("at least one candidate must provide a hash runner")
+    if options.record_differences_output and not options.hash_repetitions:
+        parser.error("record differences require a hash repetition")
 
     failures = []
     output_path = pathlib.Path(options.output)
@@ -224,7 +231,10 @@ def main():
         for input_index, (input_label, input_path) in enumerate(options.input):
             hash_rows = {}
             hash_records = {}
-            for phase, repetitions in (("hash", 1), ("performance", options.repetitions)):
+            for phase, repetitions in (
+                ("hash", options.hash_repetitions),
+                ("performance", options.repetitions),
+            ):
                 eligible = [
                     selected
                     for selected in options.candidate

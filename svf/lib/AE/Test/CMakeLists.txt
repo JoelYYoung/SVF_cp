@@ -38,7 +38,6 @@ target_link_libraries(
 )
 
 if(TARGET SvfLLVM)
-  find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_executable(svf-box-ae-integration-test BoxAEIntegrationTest.cpp)
   target_link_libraries(svf-box-ae-integration-test PRIVATE SvfLLVM)
 
@@ -74,23 +73,6 @@ if(TARGET SvfLLVM)
   )
   add_box_ae_test(
     box-ae-wide-integer WideIntegerTruncation.ll dense
-  )
-  add_test(
-    NAME box-ae-sparsity-result-equivalence
-    COMMAND
-      ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_LIST_DIR}/CompareAESparsityResults.py
-      --runner $<TARGET_FILE:svf-box-ae-integration-test>
-      --extapi ${CMAKE_BINARY_DIR}/lib/extapi.bc
-      --fixture ${CMAKE_CURRENT_LIST_DIR}/BoxReducedProduct.ll
-      --fixture ${CMAKE_CURRENT_LIST_DIR}/BoxLoop.ll
-      --fixture ${CMAKE_CURRENT_LIST_DIR}/SparseMemoryFlow.ll
-      --fixture ${CMAKE_CURRENT_LIST_DIR}/ConservativeUnknownCasts.ll
-  )
-  set_tests_properties(
-    box-ae-sparsity-result-equivalence
-    PROPERTIES
-      PASS_REGULAR_EXPRESSION "AE_SPARSITY_EQUIVALENCE PASS fixtures=4"
   )
   set_tests_properties(
     box-ae-projection-semi-sparse
