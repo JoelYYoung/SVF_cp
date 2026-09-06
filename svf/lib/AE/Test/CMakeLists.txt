@@ -30,6 +30,13 @@ add_executable(svf-core-domain-test CoreDomainTest.cpp)
 target_link_libraries(svf-core-domain-test PRIVATE AbstractDomainCore)
 add_test(NAME core-domain COMMAND svf-core-domain-test)
 
+add_executable(
+  svf-address-domain-storage-benchmark AddressDomainStorageBenchmark.cpp
+)
+target_link_libraries(
+  svf-address-domain-storage-benchmark PRIVATE AbstractDomainCore
+)
+
 if(TARGET SvfLLVM)
   add_executable(svf-box-ae-integration-test BoxAEIntegrationTest.cpp)
   target_link_libraries(svf-box-ae-integration-test PRIVATE SvfLLVM)
