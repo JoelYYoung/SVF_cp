@@ -53,11 +53,41 @@ private:
     std::uint32_t id_;
 };
 
+/// Sorted finite location storage with two inline elements. Most AE
+/// points-to facts are singletons, so they require no auxiliary allocation.
+class FiniteLocationSet
+{
+public:
+    using const_iterator = const Location*;
+
+    FiniteLocationSet() = default;
+    FiniteLocationSet(const FiniteLocationSet& other);
+    FiniteLocationSet(FiniteLocationSet&& other) noexcept = default;
+    FiniteLocationSet& operator=(const FiniteLocationSet& other);
+    FiniteLocationSet& operator=(FiniteLocationSet&& other) noexcept = default;
+
+    std::size_t size() const;
+    bool empty() const;
+    const_iterator begin() const;
+    const_iterator end() const;
+    void insert(Location location);
+    void assign(std::vector<Location> locations);
+
+    friend bool operator==(const FiniteLocationSet& lhs,
+                           const FiniteLocationSet& rhs);
+
+private:
+    static constexpr std::size_t InlineCapacity = 2;
+    std::size_t size_ = 0;
+    std::array<Location, InlineCapacity> inline_{Location(), Location()};
+    std::unique_ptr<std::vector<Location>> overflow_;
+};
+
 /// Finite points-to set for one pointer variable, with an explicit top value.
 class AddressSet
 {
 public:
-    using const_iterator = std::vector<Location>::const_iterator;
+    using const_iterator = FiniteLocationSet::const_iterator;
 
     AddressSet() = default;
 
@@ -72,7 +102,7 @@ public:
     bool hasIntersection(const AddressSet& other) const;
     std::size_t size() const;
     bool empty() const;
-    const std::vector<Location>& locations() const;
+    const FiniteLocationSet& locations() const;
     const_iterator begin() const
     {
         return locations().begin();
@@ -101,11 +131,7 @@ private:
     explicit AddressSet(bool top) : top_(top) {}
 
     bool top_ = false;
-    /// Sorted, duplicate-free finite support. AE points-to sets are usually
-    /// singletons or otherwise small, so contiguous storage avoids one heap
-    /// allocation and three pointers per pointee while retaining logarithmic
-    /// membership tests and linear set operations.
-    std::vector<Location> locations_;
+    FiniteLocationSet locations_;
 };
 
 /// Flow-sensitive address property with finite non-Top support over stable

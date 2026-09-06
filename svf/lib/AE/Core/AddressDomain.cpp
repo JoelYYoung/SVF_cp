@@ -10,6 +10,90 @@
 
 namespace SVF::AbstractDomain
 {
+FiniteLocationSet::FiniteLocationSet(const FiniteLocationSet& other)
+    : size_(other.size_), inline_(other.inline_)
+{
+    if (other.overflow_)
+        overflow_ =
+            std::make_unique<std::vector<Location>>(*other.overflow_);
+}
+
+FiniteLocationSet& FiniteLocationSet::operator=(
+    const FiniteLocationSet& other)
+{
+    if (this == &other)
+        return *this;
+    size_ = other.size_;
+    inline_ = other.inline_;
+    overflow_ = other.overflow_
+                    ? std::make_unique<std::vector<Location>>(*other.overflow_)
+                    : nullptr;
+    return *this;
+}
+
+std::size_t FiniteLocationSet::size() const
+{
+    return size_;
+}
+
+bool FiniteLocationSet::empty() const
+{
+    return size_ == 0;
+}
+
+FiniteLocationSet::const_iterator FiniteLocationSet::begin() const
+{
+    return overflow_ ? overflow_->data() : inline_.data();
+}
+
+FiniteLocationSet::const_iterator FiniteLocationSet::end() const
+{
+    return begin() + size_;
+}
+
+void FiniteLocationSet::insert(Location location)
+{
+    const auto position = std::lower_bound(begin(), end(), location);
+    if (position != end() && *position == location)
+        return;
+    const std::size_t index = static_cast<std::size_t>(position - begin());
+    if (!overflow_ && size_ < InlineCapacity)
+    {
+        std::move_backward(inline_.begin() + index, inline_.begin() + size_,
+                           inline_.begin() + size_ + 1);
+        inline_[index] = location;
+        ++size_;
+        return;
+    }
+    if (!overflow_)
+    {
+        overflow_ = std::make_unique<std::vector<Location>>(inline_.begin(),
+                                                             inline_.end());
+        overflow_->reserve(InlineCapacity * 2);
+    }
+    overflow_->insert(overflow_->begin() + index, location);
+    ++size_;
+}
+
+void FiniteLocationSet::assign(std::vector<Location> locations)
+{
+    size_ = locations.size();
+    if (locations.size() <= InlineCapacity)
+    {
+        overflow_.reset();
+        std::copy(locations.begin(), locations.end(), inline_.begin());
+        return;
+    }
+    overflow_ =
+        std::make_unique<std::vector<Location>>(std::move(locations));
+}
+
+bool operator==(const FiniteLocationSet& lhs, const FiniteLocationSet& rhs)
+{
+    return lhs.size_ == rhs.size_ &&
+           std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
 AddressSet AddressSet::bottom()
 {
     return AddressSet(false);
@@ -75,7 +159,7 @@ bool AddressSet::empty() const
     return isBottom();
 }
 
-const std::vector<Location>& AddressSet::locations() const
+const FiniteLocationSet& AddressSet::locations() const
 {
     if (top_)
         throw std::logic_error("top address set has no finite enumeration");
@@ -86,10 +170,7 @@ void AddressSet::insert(Location location)
 {
     if (top_)
         return;
-    const auto position =
-        std::lower_bound(locations_.begin(), locations_.end(), location);
-    if (position == locations_.end() || *position != location)
-        locations_.insert(position, location);
+    locations_.insert(location);
 }
 
 void AddressSet::joinWith(const AddressSet& other)
@@ -106,7 +187,7 @@ void AddressSet::joinWith(const AddressSet& other)
     std::set_union(locations_.begin(), locations_.end(),
                    other.locations_.begin(), other.locations_.end(),
                    std::back_inserter(joined));
-    locations_ = std::move(joined);
+    locations_.assign(std::move(joined));
 }
 
 void AddressSet::meetWith(const AddressSet& other)
@@ -123,7 +204,7 @@ void AddressSet::meetWith(const AddressSet& other)
     std::set_intersection(locations_.begin(), locations_.end(),
                           other.locations_.begin(), other.locations_.end(),
                           std::back_inserter(intersection));
-    locations_ = std::move(intersection);
+    locations_.assign(std::move(intersection));
 }
 
 bool AddressSet::isSubsetOf(const AddressSet& other) const
