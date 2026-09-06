@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <set>
 #include <stdexcept>
@@ -157,6 +158,40 @@ StorageObservations observeStorage(AbstractInterpretation& analysis)
     if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
         observations.scalar.observe(requireBoxState(*scalar));
     return observations;
+}
+
+std::uint64_t semanticChecksum(AbstractInterpretation& analysis)
+{
+    constexpr std::uint64_t offset = 14695981039346656037ULL;
+    constexpr std::uint64_t prime = 1099511628211ULL;
+    std::uint64_t hash = offset;
+    auto consume = [&](const std::string& value) {
+        for (unsigned char byte : value)
+        {
+            hash ^= byte;
+            hash *= prime;
+        }
+        hash ^= 0xffU;
+        hash *= prime;
+    };
+
+    std::vector<const ICFGNode*> nodes(analysis.getAnalyzedNodes().begin(),
+                                       analysis.getAnalyzedNodes().end());
+    std::sort(nodes.begin(), nodes.end(), [](const ICFGNode* lhs,
+                                             const ICFGNode* rhs) {
+        return lhs->getId() < rhs->getId();
+    });
+    for (const ICFGNode* node : nodes)
+    {
+        consume(std::to_string(node->getId()));
+        consume(analysis.getAbstractState(node).toString());
+    }
+    if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
+    {
+        consume("scalar");
+        consume(scalar->toString());
+    }
+    return hash;
 }
 
 void validateVariableIdLayout(const SVFIR& graph)
@@ -313,6 +348,10 @@ int main(int argc, char** argv)
 
         std::cout << "AE_GENERIC_OBSERVATION analyzed_nodes="
                   << analysis.getAnalyzedNodes().size() << '\n';
+        if (std::getenv("SVF_AE_SEMANTIC_CHECKSUM"))
+            std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
+                      << std::setw(16) << std::setfill('0')
+                      << semanticChecksum(analysis) << std::dec << '\n';
         if (std::getenv("SVF_AE_STORAGE_OBSERVATION"))
         {
             const StorageObservations storage = observeStorage(analysis);
