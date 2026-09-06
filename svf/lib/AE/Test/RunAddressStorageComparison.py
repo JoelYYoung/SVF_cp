@@ -151,57 +151,59 @@ def main():
 
     rows = []
     failures = []
-    for input_index, (input_label, input_path) in enumerate(options.input):
-        observations = {item[0]: [] for item in options.candidate}
-        for repetition in range(1, options.repetitions + 1):
-            offset = (input_index + repetition - 1) % len(options.candidate)
-            order = options.candidate[offset:] + options.candidate[:offset]
-            for selected in order:
-                result = run_once(options, selected, input_path)
-                result.update(input=input_label, repetition=repetition)
-                rows.append(result)
-                observations[selected[0]].append(result)
-                print(
-                    f"{input_label:18s} {selected[0]:20s} "
-                    f"{result['status']:7s} {result['seconds']}s "
-                    f"rss={result['peak_rss_bytes']} "
-                    f"nodes={result['analyzed_nodes']} "
-                    f"checksum={result['semantic_checksum']}",
-                    flush=True,
-                )
-
-        if options.require_all_pass:
-            for label, samples in observations.items():
-                for sample in samples:
-                    if sample["status"] != "pass":
-                        failures.append(
-                            f"{input_label}/{label}#{sample['repetition']}="
-                            f"{sample['status']}"
-                        )
-        if options.require_semantic_match:
-            signatures = {
-                (sample["analyzed_nodes"], sample["semantic_checksum"])
-                for samples in observations.values()
-                for sample in samples
-                if sample["status"] == "pass"
-            }
-            completed = sum(
-                sample["status"] == "pass"
-                for samples in observations.values()
-                for sample in samples
-            )
-            expected = len(options.candidate) * options.repetitions
-            if completed != expected or len(signatures) != 1 or ("", "") in signatures:
-                failures.append(
-                    f"{input_label}: semantic signatures={sorted(signatures)}"
-                )
-
     output_path = pathlib.Path(options.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", newline="") as output_file:
         writer = csv.DictWriter(output_file, fieldnames=FIELDS)
         writer.writeheader()
-        writer.writerows(rows)
+        output_file.flush()
+        for input_index, (input_label, input_path) in enumerate(options.input):
+            observations = {item[0]: [] for item in options.candidate}
+            for repetition in range(1, options.repetitions + 1):
+                offset = (input_index + repetition - 1) % len(options.candidate)
+                order = options.candidate[offset:] + options.candidate[:offset]
+                for selected in order:
+                    result = run_once(options, selected, input_path)
+                    result.update(input=input_label, repetition=repetition)
+                    rows.append(result)
+                    observations[selected[0]].append(result)
+                    writer.writerow(result)
+                    output_file.flush()
+                    print(
+                        f"{input_label:18s} {selected[0]:20s} "
+                        f"{result['status']:7s} {result['seconds']}s "
+                        f"rss={result['peak_rss_bytes']} "
+                        f"nodes={result['analyzed_nodes']} "
+                        f"checksum={result['semantic_checksum']}",
+                        flush=True,
+                    )
+
+            if options.require_all_pass:
+                for label, samples in observations.items():
+                    for sample in samples:
+                        if sample["status"] != "pass":
+                            failures.append(
+                                f"{input_label}/{label}#{sample['repetition']}="
+                                f"{sample['status']}"
+                            )
+            if options.require_semantic_match:
+                signatures = {
+                    (sample["analyzed_nodes"], sample["semantic_checksum"])
+                    for samples in observations.values()
+                    for sample in samples
+                    if sample["status"] == "pass"
+                }
+                completed = sum(
+                    sample["status"] == "pass"
+                    for samples in observations.values()
+                    for sample in samples
+                )
+                expected = len(options.candidate) * options.repetitions
+                if (completed != expected or len(signatures) != 1 or
+                        ("", "") in signatures):
+                    failures.append(
+                        f"{input_label}: semantic signatures={sorted(signatures)}"
+                    )
 
     for label, _, _ in options.candidate:
         passed = [
