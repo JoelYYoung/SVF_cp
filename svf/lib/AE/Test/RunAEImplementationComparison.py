@@ -31,6 +31,18 @@ FIELDS = (
     "diagnostic",
 )
 
+DIFFERENCE_FIELDS = (
+    "host",
+    "input",
+    "reference",
+    "candidate",
+    "hash_equal",
+    "reference_only_records",
+    "candidate_only_records",
+    "first_reference_only_record",
+    "first_candidate_only_record",
+)
+
 
 def labeled_path(value):
     if "=" not in value:
@@ -91,6 +103,8 @@ def run_once(options, selected, input_path, phase, repetition):
     if phase == "hash":
         environment["SVF_AE_RESULT_HASH"] = "1"
         environment["SVF_AE_SEMANTIC_CHECKSUM"] = "1"
+        if options.record_differences_output:
+            environment["SVF_AE_RESULT_RECORDS"] = "1"
     command = [
         "/usr/bin/time",
         "-v",
@@ -139,7 +153,7 @@ def run_once(options, selected, input_path, phase, repetition):
         r"AE_RESULT_HASH fnv1a64=([0-9a-f]+) records=(\d+)", output
     )
     lines = output.rstrip().splitlines()
-    return {
+    result_row = {
         "host": platform.node(),
         "candidate": label,
         "phase": phase,
@@ -153,6 +167,8 @@ def run_once(options, selected, input_path, phase, repetition):
         "return_code": process.returncode,
         "diagnostic": lines[-1][-500:] if lines else "",
     }
+    result_records = re.findall(r"^AE_RESULT_RECORD (.*)$", output, re.MULTILINE)
+    return result_row, result_records
 
 
 def main():
@@ -167,6 +183,7 @@ def main():
         "--memory-bytes", type=int, default=512 * 1024 * 1024 * 1024
     )
     parser.add_argument("--require-all-pass", action="store_true")
+    parser.add_argument("--record-differences-output")
     parser.add_argument("--output", required=True)
     options = parser.parse_args()
     if options.repetitions <= 0 or options.timeout <= 0:
@@ -175,20 +192,37 @@ def main():
     failures = []
     output_path = pathlib.Path(options.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", newline="") as output_file:
+    differences_file = None
+    differences_writer = None
+    if options.record_differences_output:
+        differences_path = pathlib.Path(options.record_differences_output)
+        differences_path.parent.mkdir(parents=True, exist_ok=True)
+        differences_file = differences_path.open("w", newline="")
+        differences_writer = csv.DictWriter(
+            differences_file, fieldnames=DIFFERENCE_FIELDS
+        )
+        differences_writer.writeheader()
+        differences_file.flush()
+    output_file = output_path.open("w", newline="")
+    try:
         writer = csv.DictWriter(output_file, fieldnames=FIELDS)
         writer.writeheader()
         output_file.flush()
         for input_index, (input_label, input_path) in enumerate(options.input):
+            hash_rows = {}
+            hash_records = {}
             for phase, repetitions in (("hash", 1), ("performance", options.repetitions)):
                 for repetition in range(1, repetitions + 1):
                     offset = (input_index + repetition - 1) % len(options.candidate)
                     order = options.candidate[offset:] + options.candidate[:offset]
                     for selected in order:
-                        result = run_once(
+                        result, records = run_once(
                             options, selected, input_path, phase, repetition
                         )
                         result["input"] = input_label
+                        if phase == "hash":
+                            hash_rows[selected[0]] = result
+                            hash_records[selected[0]] = set(records)
                         writer.writerow(result)
                         output_file.flush()
                         print(
@@ -212,6 +246,43 @@ def main():
                             failures.append(
                                 f"{input_label}/{selected[0]} missing result hash"
                             )
+                if phase == "hash" and differences_writer:
+                    reference = options.candidate[0][0]
+                    reference_records = hash_records[reference]
+                    for selected in options.candidate:
+                        label = selected[0]
+                        candidate_records = hash_records[label]
+                        reference_only = sorted(
+                            reference_records - candidate_records
+                        )
+                        candidate_only = sorted(
+                            candidate_records - reference_records
+                        )
+                        differences_writer.writerow(
+                            {
+                                "host": platform.node(),
+                                "input": input_label,
+                                "reference": reference,
+                                "candidate": label,
+                                "hash_equal": str(
+                                    hash_rows[reference]["result_hash"]
+                                    == hash_rows[label]["result_hash"]
+                                ).lower(),
+                                "reference_only_records": len(reference_only),
+                                "candidate_only_records": len(candidate_only),
+                                "first_reference_only_record": (
+                                    reference_only[0] if reference_only else ""
+                                ),
+                                "first_candidate_only_record": (
+                                    candidate_only[0] if candidate_only else ""
+                                ),
+                            }
+                        )
+                    differences_file.flush()
+    finally:
+        output_file.close()
+        if differences_file:
+            differences_file.close()
     if failures:
         raise RuntimeError("; ".join(failures))
 
