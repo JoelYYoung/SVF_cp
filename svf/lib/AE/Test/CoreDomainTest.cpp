@@ -385,6 +385,48 @@ void testAddressDomain()
                 emptyPointer.addressSet(q).isTop(),
             "an empty pointer fact was confused with whole-property Bottom");
 
+    AddressSet reordered = AddressSet::bottom();
+    reordered.insert(Location(40));
+    reordered.insert(Location(10));
+    reordered.insert(Location(30));
+    reordered.insert(Location(20));
+    reordered.insert(Location(20));
+    std::vector<std::uint32_t> locationIds;
+    for (Location location : reordered.locations())
+        locationIds.push_back(location.id());
+    require(locationIds == std::vector<std::uint32_t>({10, 20, 30, 40}),
+            "AddressSet did not preserve sorted duplicate-free iteration");
+    AddressSet isolatedSet = reordered;
+    isolatedSet.insert(Location(50));
+    require(!reordered.contains(Location(50)) &&
+                isolatedSet.contains(Location(50)),
+            "AddressSet growth changed a copied finite set");
+
+    AddressDomain large = AddressDomain::top();
+    std::vector<Variable> sparseVariables;
+    for (std::uint32_t index = 0; index < 40; ++index)
+    {
+        const Variable variable(1000 + index * 97);
+        sparseVariables.push_back(variable);
+        large.assign(variable,
+                     AddressSet::singleton(Location(100 + index)));
+    }
+    AddressDomain isolatedLarge = large;
+    isolatedLarge.assign(sparseVariables[17],
+                         AddressSet::singleton(Location(9999)));
+    require(large.addressSet(sparseVariables[17]).contains(Location(117)) &&
+                !large.addressSet(sparseVariables[17]).contains(
+                    Location(9999)) &&
+                isolatedLarge.addressSet(sparseVariables[17])
+                    .contains(Location(9999)),
+            "large sparse Address copy-on-write changed the source property");
+    for (Variable variable : sparseVariables)
+        isolatedLarge.forget(variable);
+    require(isolatedLarge.isTop() &&
+                large.nonDefaultVariables().size() == sparseVariables.size(),
+            "large sparse Address erasure lost Top normalization or source "
+            "isolation");
+
     BoxDomain numerical = BoxDomain::top();
     requireThrows([&] { unknown.joinWith(numerical); },
                   "AbstractDomain accepted a cross-kind lattice operation");
