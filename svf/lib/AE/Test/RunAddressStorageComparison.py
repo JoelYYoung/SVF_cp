@@ -25,6 +25,7 @@ FIELDS = (
     "seconds",
     "peak_rss_bytes",
     "analyzed_nodes",
+    "result_hash",
     "semantic_checksum",
     "semantic_shape_checksum",
     "storage_observation",
@@ -115,6 +116,7 @@ def run_once(options, selected, input_path):
         rss = peak_rss(time_output.read().decode(errors="replace"))
 
     nodes = re.search(r"AE_GENERIC_OBSERVATION analyzed_nodes=(\d+)", output)
+    result_hash = re.search(r"AE_RESULT_HASH fnv1a64=([0-9a-f]+)", output)
     checksum = re.search(r"AE_SEMANTIC_CHECKSUM fnv1a64=([0-9a-f]+)", output)
     shape_checksum = re.search(
         r"AE_SEMANTIC_SHAPE_CHECKSUM fnv1a64=([0-9a-f]+)", output
@@ -128,6 +130,7 @@ def run_once(options, selected, input_path):
         "seconds": f"{elapsed:.6f}",
         "peak_rss_bytes": rss if rss is not None else "",
         "analyzed_nodes": nodes.group(1) if nodes else "",
+        "result_hash": result_hash.group(1) if result_hash else "",
         "semantic_checksum": checksum.group(1) if checksum else "",
         "semantic_shape_checksum": (
             shape_checksum.group(1) if shape_checksum else ""
@@ -184,6 +187,7 @@ def main():
                         f"{result['status']:7s} {result['seconds']}s "
                         f"rss={result['peak_rss_bytes']} "
                         f"nodes={result['analyzed_nodes']} "
+                        f"result={result['result_hash']} "
                         f"checksum={result['semantic_checksum']} "
                         f"shape={result['semantic_shape_checksum']}",
                         flush=True,
@@ -199,7 +203,7 @@ def main():
                             )
             if options.require_semantic_match:
                 signatures = {
-                    (sample["analyzed_nodes"], sample["semantic_shape_checksum"])
+                    (sample["analyzed_nodes"], sample["result_hash"])
                     for samples in observations.values()
                     for sample in samples
                     if sample["status"] == "pass"
@@ -211,7 +215,7 @@ def main():
                 )
                 expected = len(options.candidate) * options.repetitions
                 if (completed != expected or len(signatures) != 1 or
-                        any(not shape for _, shape in signatures)):
+                        any(not result for _, result in signatures)):
                     failures.append(
                         f"{input_label}: semantic signatures={sorted(signatures)}"
                     )

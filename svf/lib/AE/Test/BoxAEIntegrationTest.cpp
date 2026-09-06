@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -211,10 +212,10 @@ std::uint64_t semanticChecksum(AbstractInterpretation& analysis)
 
     std::vector<const ICFGNode*> nodes(analysis.getAnalyzedNodes().begin(),
                                        analysis.getAnalyzedNodes().end());
-    std::sort(nodes.begin(), nodes.end(), [](const ICFGNode* lhs,
-                                             const ICFGNode* rhs) {
-        return lhs->getId() < rhs->getId();
-    });
+    std::sort(nodes.begin(), nodes.end(),
+              [](const ICFGNode* lhs, const ICFGNode* rhs) {
+                  return lhs->getId() < rhs->getId();
+              });
     for (const ICFGNode* node : nodes)
     {
         consume(std::to_string(node->getId()));
@@ -226,6 +227,130 @@ std::uint64_t semanticChecksum(AbstractInterpretation& analysis)
         consume(scalar->toString());
     }
     return hash;
+}
+
+struct ResultChecksum
+{
+    std::uint64_t value;
+    std::size_t records;
+};
+
+std::string canonicalAddressSet(const AD::AddressSet& addresses,
+                                const SVFIRAdapter& adapter)
+{
+    if (addresses.isTop())
+        return "top";
+    if (addresses.isBottom())
+        return "bottom";
+    std::vector<NodeID> objectIds;
+    objectIds.reserve(addresses.size());
+    for (AD::Location location : addresses.locations())
+    {
+        objectIds.push_back(
+            location.isNull() ? 0U : adapter.object(location).getId());
+    }
+    std::sort(objectIds.begin(), objectIds.end());
+    std::string result = "{";
+    for (NodeID objectId : objectIds)
+    {
+        if (result.size() != 1)
+            result += ',';
+        result += std::to_string(objectId);
+    }
+    return result + '}';
+}
+
+/// Hash the analysis result through stable SVF identities rather than the
+/// Box implementation's packed Variable/Location coordinates. The contract
+/// deliberately covers the Box and Address projections under study; storage
+/// layout, page size, pointer identity, and traversal order are unobservable.
+ResultChecksum resultChecksum(const SVFIR& graph,
+                              AbstractInterpretation& analysis)
+{
+    SVFIRAdapter adapter(graph);
+    std::vector<std::string> records;
+    auto numericalRecord = [&](const char* carrier, NodeID point, NodeID id,
+                               const AD::Interval& value) {
+        records.push_back(std::string(carrier) + '|' + std::to_string(point) +
+                          '|' + std::to_string(id) + "|N|" + value.toString());
+    };
+    auto addressRecord = [&](const char* carrier, NodeID point, NodeID id,
+                             const AD::AddressSet& value) {
+        records.push_back(std::string(carrier) + '|' + std::to_string(point) +
+                          '|' + std::to_string(id) + "|A|" +
+                          canonicalAddressSet(value, adapter));
+    };
+
+    if (const AD::AbstractDomain* property = analysis.getScalarAbstractState())
+    {
+        const BoxProgramState& scalar = requireBoxState(*property);
+        if (scalar.isBottom())
+            records.emplace_back("S|bottom");
+        for (AD::Variable variable : scalar.numerical().constrainedVariables())
+        {
+            if (const ValVar* value = adapter.value(variable))
+                numericalRecord("S", 0, value->getId(),
+                                scalar.numerical().bound(variable));
+        }
+        for (AD::Variable variable : scalar.addresses().nonDefaultVariables())
+        {
+            if (const ValVar* value = adapter.value(variable))
+                addressRecord("S", 0, value->getId(),
+                              scalar.addresses().addressSet(variable));
+        }
+    }
+
+    std::vector<const ICFGNode*> nodes(analysis.getAnalyzedNodes().begin(),
+                                       analysis.getAnalyzedNodes().end());
+    std::sort(nodes.begin(), nodes.end(),
+              [](const ICFGNode* lhs, const ICFGNode* rhs) {
+                  return lhs->getId() < rhs->getId();
+              });
+    for (const ICFGNode* node : nodes)
+    {
+        const NodeID point = node->getId();
+        records.push_back("R|" + std::to_string(point));
+        const BoxProgramState& state =
+            requireBoxState(analysis.getAbstractState(node));
+        if (state.isBottom())
+        {
+            records.push_back("M|" + std::to_string(point) + "|bottom");
+            continue;
+        }
+        for (AD::Variable variable : state.numerical().constrainedVariables())
+        {
+            if (const ObjVar* object = adapter.contentObject(variable))
+                numericalRecord("M", point, object->getId(),
+                                state.numerical().bound(variable));
+        }
+        for (AD::Variable variable : state.addresses().nonDefaultVariables())
+        {
+            if (const ObjVar* object = adapter.contentObject(variable))
+                addressRecord("M", point, object->getId(),
+                              state.addresses().addressSet(variable));
+        }
+    }
+
+    std::sort(records.begin(), records.end());
+    if (std::getenv("SVF_AE_RESULT_RECORDS"))
+    {
+        for (const std::string& record : records)
+            std::cout << "AE_RESULT_RECORD " << record << '\n';
+    }
+    constexpr std::uint64_t offset = 14695981039346656037ULL;
+    constexpr std::uint64_t prime = 1099511628211ULL;
+    std::uint64_t hash = offset;
+    for (const std::string& record : records)
+    {
+        for (unsigned char byte : record)
+        {
+            hash ^= byte;
+            hash *= prime;
+        }
+        hash ^= 0xffU;
+        hash *= prime;
+    }
+    return {hash, records.size()};
 }
 
 std::string stateShape(const BoxProgramState& state)
@@ -447,6 +572,11 @@ int main(int argc, char** argv)
                   << analysis.getAnalyzedNodes().size() << '\n';
         if (std::getenv("SVF_AE_SEMANTIC_CHECKSUM"))
         {
+            const ResultChecksum result = resultChecksum(*graph, analysis);
+            std::cout << "AE_RESULT_HASH fnv1a64=" << std::hex << std::setw(16)
+                      << std::setfill('0') << result.value << std::dec
+                      << " records=" << result.records
+                      << " contract=svf-id-box-address-v1\n";
             std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
                       << std::setw(16) << std::setfill('0')
                       << semanticChecksum(analysis) << std::dec << '\n';
@@ -478,28 +608,23 @@ int main(int argc, char** argv)
                 << " flow_address_p99=" << storage.flow.percentile(0.99)
                 << " flow_address_max=" << storage.flow.percentile(1.0)
                 << " flow_finite_pointees=" << storage.flow.finitePointees
-                << " flow_set_size_p50="
-                << storage.flow.setSizePercentile(0.50)
-                << " flow_set_size_p95="
-                << storage.flow.setSizePercentile(0.95)
-                << " flow_set_size_p99="
-                << storage.flow.setSizePercentile(0.99)
+                << " flow_set_size_p50=" << storage.flow.setSizePercentile(0.50)
+                << " flow_set_size_p95=" << storage.flow.setSizePercentile(0.95)
+                << " flow_set_size_p99=" << storage.flow.setSizePercentile(0.99)
                 << " flow_largest_address_set="
                 << storage.flow.largestAddressSet
                 << " scalar_numerical_facts=" << storage.scalar.numericalFacts
                 << " scalar_address_facts=" << storage.scalar.addressFacts
                 << " scalar_address_pages8=" << storage.scalar.addressPages8
                 << " scalar_address_pages16=" << storage.scalar.addressPages16
-                << " scalar_address_pages32="
-                << storage.scalar.addressPages32
+                << " scalar_address_pages32=" << storage.scalar.addressPages32
                 << " scalar_address_states_above16="
                 << storage.scalar.addressStatesAbove16
                 << " scalar_address_facts_above16="
                 << storage.scalar.addressFactsAbove16
                 << " scalar_address_pages16_above16="
                 << storage.scalar.addressPages16Above16
-                << " scalar_finite_pointees="
-                << storage.scalar.finitePointees
+                << " scalar_finite_pointees=" << storage.scalar.finitePointees
                 << " scalar_set_size_p50="
                 << storage.scalar.setSizePercentile(0.50)
                 << " scalar_set_size_p95="
