@@ -90,7 +90,7 @@ def run_once(options, selected, input_path):
         str(input_path),
     ]
     with tempfile.NamedTemporaryFile() as time_output:
-        command[4] = time_output.name
+        command[3] = time_output.name
         started = time.perf_counter()
         process = subprocess.Popen(
             command,
