@@ -76,6 +76,9 @@ struct StorageObservation
     std::size_t addressPages8 = 0;
     std::size_t addressPages16 = 0;
     std::size_t addressPages32 = 0;
+    std::size_t addressStatesAbove16 = 0;
+    std::size_t addressFactsAbove16 = 0;
+    std::size_t addressPages16Above16 = 0;
     std::size_t finitePointees = 0;
     std::size_t largestAddressSet = 0;
     std::vector<std::size_t> addressFactsPerState;
@@ -116,6 +119,12 @@ struct StorageObservation
         addressPages8 += pages8.size();
         addressPages16 += pages16.size();
         addressPages32 += pages32.size();
+        if (pointers.size() > 16)
+        {
+            ++addressStatesAbove16;
+            addressFactsAbove16 += pointers.size();
+            addressPages16Above16 += pages16.size();
+        }
     }
 
     std::size_t percentile(double fraction) const
@@ -390,6 +399,12 @@ int main(int argc, char** argv)
                 << " flow_address_pages8=" << storage.flow.addressPages8
                 << " flow_address_pages16=" << storage.flow.addressPages16
                 << " flow_address_pages32=" << storage.flow.addressPages32
+                << " flow_address_states_above16="
+                << storage.flow.addressStatesAbove16
+                << " flow_address_facts_above16="
+                << storage.flow.addressFactsAbove16
+                << " flow_address_pages16_above16="
+                << storage.flow.addressPages16Above16
                 << " flow_address_p50=" << storage.flow.percentile(0.50)
                 << " flow_address_p95=" << storage.flow.percentile(0.95)
                 << " flow_address_p99=" << storage.flow.percentile(0.99)
@@ -409,6 +424,12 @@ int main(int argc, char** argv)
                 << " scalar_address_pages16=" << storage.scalar.addressPages16
                 << " scalar_address_pages32="
                 << storage.scalar.addressPages32
+                << " scalar_address_states_above16="
+                << storage.scalar.addressStatesAbove16
+                << " scalar_address_facts_above16="
+                << storage.scalar.addressFactsAbove16
+                << " scalar_address_pages16_above16="
+                << storage.scalar.addressPages16Above16
                 << " scalar_finite_pointees="
                 << storage.scalar.finitePointees
                 << " scalar_set_size_p50="
