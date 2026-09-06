@@ -74,6 +74,7 @@ struct StorageObservation
     std::size_t addressFacts = 0;
     std::size_t finitePointees = 0;
     std::size_t largestAddressSet = 0;
+    std::vector<std::size_t> addressFactsPerState;
 
     void observe(const BoxProgramState& state)
     {
@@ -89,6 +90,7 @@ struct StorageObservation
         const std::vector<AD::Variable> pointers =
             state.addresses().nonDefaultVariables();
         addressFacts += pointers.size();
+        addressFactsPerState.push_back(pointers.size());
         for (AD::Variable variable : pointers)
         {
             const AD::AddressSet addresses =
@@ -100,16 +102,61 @@ struct StorageObservation
             largestAddressSet = std::max(largestAddressSet, addresses.size());
         }
     }
+
+    std::size_t percentile(double fraction) const
+    {
+        if (addressFactsPerState.empty())
+            return 0;
+        std::vector<std::size_t> sorted = addressFactsPerState;
+        std::sort(sorted.begin(), sorted.end());
+        const std::size_t index = static_cast<std::size_t>(
+            fraction * static_cast<double>(sorted.size() - 1));
+        return sorted[index];
+    }
 };
 
-StorageObservation observeStorage(AbstractInterpretation& analysis)
+struct StorageObservations
 {
-    StorageObservation observation;
+    StorageObservation flow;
+    StorageObservation scalar;
+};
+
+struct VariablePopulation
+{
+    std::size_t pointerScalars = 0;
+    std::size_t pointerContents = 0;
+};
+
+VariablePopulation observeVariablePopulation(const SVFIR& graph)
+{
+    VariablePopulation population;
+    for (auto iterator = graph.begin(); iterator != graph.end(); ++iterator)
+    {
+        const SVFVar* value = iterator->second;
+        if (const auto* scalar = SVFUtil::dyn_cast<ValVar>(value))
+        {
+            if (scalar->isPointer() &&
+                !scalar->isConstDataOrAggDataButNotNullPtr())
+                ++population.pointerScalars;
+        }
+        else if (const auto* object = SVFUtil::dyn_cast<ObjVar>(value))
+        {
+            if (object->isPointer())
+                ++population.pointerContents;
+        }
+    }
+    return population;
+}
+
+StorageObservations observeStorage(AbstractInterpretation& analysis)
+{
+    StorageObservations observations;
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
-        observation.observe(requireBoxState(analysis.getAbstractState(node)));
+        observations.flow.observe(
+            requireBoxState(analysis.getAbstractState(node)));
     if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
-        observation.observe(requireBoxState(*scalar));
-    return observation;
+        observations.scalar.observe(requireBoxState(*scalar));
+    return observations;
 }
 
 void validateVariableIdLayout(const SVFIR& graph)
@@ -268,14 +315,28 @@ int main(int argc, char** argv)
                   << analysis.getAnalyzedNodes().size() << '\n';
         if (std::getenv("SVF_AE_STORAGE_OBSERVATION"))
         {
-            const StorageObservation storage = observeStorage(analysis);
-            std::cout << "AE_STORAGE_OBSERVATION states=" << storage.states
-                      << " numerical_facts=" << storage.numericalFacts
-                      << " numerical_pages=" << storage.numericalPages
-                      << " address_facts=" << storage.addressFacts
-                      << " finite_pointees=" << storage.finitePointees
-                      << " largest_address_set=" << storage.largestAddressSet
-                      << '\n';
+            const StorageObservations storage = observeStorage(analysis);
+            const VariablePopulation population =
+                observeVariablePopulation(*graph);
+            std::cout
+                << "AE_STORAGE_OBSERVATION flow_states=" << storage.flow.states
+                << " flow_numerical_facts=" << storage.flow.numericalFacts
+                << " flow_numerical_pages=" << storage.flow.numericalPages
+                << " flow_address_facts=" << storage.flow.addressFacts
+                << " flow_address_p50=" << storage.flow.percentile(0.50)
+                << " flow_address_p95=" << storage.flow.percentile(0.95)
+                << " flow_address_p99=" << storage.flow.percentile(0.99)
+                << " flow_address_max=" << storage.flow.percentile(1.0)
+                << " scalar_numerical_facts=" << storage.scalar.numericalFacts
+                << " scalar_address_facts=" << storage.scalar.addressFacts
+                << " pointer_scalar_variables=" << population.pointerScalars
+                << " pointer_content_variables=" << population.pointerContents
+                << " finite_pointees="
+                << storage.flow.finitePointees + storage.scalar.finitePointees
+                << " largest_address_set="
+                << std::max(storage.flow.largestAddressSet,
+                            storage.scalar.largestAddressSet)
+                << '\n';
         }
         std::cout << "Box AE integration test: PASS\n";
         AndersenWaveDiff::releaseAndersenWaveDiff();
