@@ -38,10 +38,10 @@ def main():
         if any((program, candidate) not in grouped for candidate in candidates):
             continue
         signatures = {
-            (row["analyzed_nodes"], row["semantic_checksum"])
+            (row["analyzed_nodes"], row["semantic_shape_checksum"])
             for candidate in candidates
             for row in grouped[(program, candidate)]
-            if row["semantic_checksum"]
+            if row.get("semantic_shape_checksum")
         }
         if signatures and len(signatures) != 1:
             raise RuntimeError(f"semantic mismatch for {program}: {signatures}")
