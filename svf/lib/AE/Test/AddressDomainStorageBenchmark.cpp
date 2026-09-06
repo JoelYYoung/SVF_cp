@@ -95,6 +95,16 @@ void benchmarkAddressSets(std::size_t scale)
 
 void benchmarkDomains(std::size_t scale)
 {
+    report("domain", "construct-top", 0, 1,
+           measure(scale, [&](std::size_t) {
+               const AD::AddressDomain value = AD::AddressDomain::top();
+               observation += value.isTop();
+           }));
+    report("domain", "construct-bottom", 0, 1,
+           measure(scale, [&](std::size_t) {
+               const AD::AddressDomain value = AD::AddressDomain::bottom();
+               observation += value.isBottom();
+           }));
     for (std::uint32_t stride : {1U, 97U})
     {
         for (std::size_t size : {1U, 4U, 16U, 64U, 1024U, 16384U})
