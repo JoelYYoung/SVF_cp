@@ -76,6 +76,7 @@ struct StorageObservation
     std::size_t finitePointees = 0;
     std::size_t largestAddressSet = 0;
     std::vector<std::size_t> addressFactsPerState;
+    std::vector<std::size_t> addressSetSizes;
 
     void observe(const BoxProgramState& state)
     {
@@ -101,6 +102,7 @@ struct StorageObservation
                     "Address non-default support contains Top");
             finitePointees += addresses.size();
             largestAddressSet = std::max(largestAddressSet, addresses.size());
+            addressSetSizes.push_back(addresses.size());
         }
     }
 
@@ -109,6 +111,17 @@ struct StorageObservation
         if (addressFactsPerState.empty())
             return 0;
         std::vector<std::size_t> sorted = addressFactsPerState;
+        std::sort(sorted.begin(), sorted.end());
+        const std::size_t index = static_cast<std::size_t>(
+            fraction * static_cast<double>(sorted.size() - 1));
+        return sorted[index];
+    }
+
+    std::size_t setSizePercentile(double fraction) const
+    {
+        if (addressSetSizes.empty())
+            return 0;
+        std::vector<std::size_t> sorted = addressSetSizes;
         std::sort(sorted.begin(), sorted.end());
         const std::size_t index = static_cast<std::size_t>(
             fraction * static_cast<double>(sorted.size() - 1));
@@ -366,8 +379,27 @@ int main(int argc, char** argv)
                 << " flow_address_p95=" << storage.flow.percentile(0.95)
                 << " flow_address_p99=" << storage.flow.percentile(0.99)
                 << " flow_address_max=" << storage.flow.percentile(1.0)
+                << " flow_finite_pointees=" << storage.flow.finitePointees
+                << " flow_set_size_p50="
+                << storage.flow.setSizePercentile(0.50)
+                << " flow_set_size_p95="
+                << storage.flow.setSizePercentile(0.95)
+                << " flow_set_size_p99="
+                << storage.flow.setSizePercentile(0.99)
+                << " flow_largest_address_set="
+                << storage.flow.largestAddressSet
                 << " scalar_numerical_facts=" << storage.scalar.numericalFacts
                 << " scalar_address_facts=" << storage.scalar.addressFacts
+                << " scalar_finite_pointees="
+                << storage.scalar.finitePointees
+                << " scalar_set_size_p50="
+                << storage.scalar.setSizePercentile(0.50)
+                << " scalar_set_size_p95="
+                << storage.scalar.setSizePercentile(0.95)
+                << " scalar_set_size_p99="
+                << storage.scalar.setSizePercentile(0.99)
+                << " scalar_largest_address_set="
+                << storage.scalar.largestAddressSet
                 << " pointer_scalar_variables=" << population.pointerScalars
                 << " pointer_content_variables=" << population.pointerContents
                 << " finite_pointees="
