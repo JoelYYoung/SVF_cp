@@ -76,7 +76,11 @@ if(TARGET SvfLLVM)
   )
   set_tests_properties(
     box-ae-projection-semi-sparse
-    PROPERTIES ENVIRONMENT "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1"
+    PROPERTIES
+      ENVIRONMENT
+        "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1;SVF_AE_SEMANTIC_CHECKSUM=1"
+      PASS_REGULAR_EXPRESSION
+        "AE_RESULT_HASH fnv1a64=[0-9a-f]+ records=[0-9]+ contract=svf-id-box-address-v1"
   )
 endif()
 
