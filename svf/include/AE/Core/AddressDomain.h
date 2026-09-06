@@ -158,16 +158,8 @@ public:
     void forget(Variable variable);
 
 private:
-#ifndef SVF_AE_ADDRESS_VALUES_PER_PAGE
-#define SVF_AE_ADDRESS_VALUES_PER_PAGE 16
-#endif
-#ifndef SVF_AE_ADDRESS_SMALL_THRESHOLD
-#define SVF_AE_ADDRESS_SMALL_THRESHOLD 16
-#endif
-    static constexpr std::size_t ValuesPerPage =
-        SVF_AE_ADDRESS_VALUES_PER_PAGE;
-    static constexpr std::size_t SmallThreshold =
-        SVF_AE_ADDRESS_SMALL_THRESHOLD;
+    static constexpr std::size_t ValuesPerPage = 16;
+    static constexpr std::size_t SmallThreshold = 16;
 
     using Value = std::pair<Variable, AddressSet>;
     using SmallValues = std::vector<Value>;
