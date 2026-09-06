@@ -4,28 +4,12 @@
 
 #include <algorithm>
 #include <iterator>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
 
 namespace SVF::AbstractDomain
 {
-namespace
-{
-template <typename Key, typename Value>
-std::set<Key> combinedKeys(const std::map<Key, Value>& lhs,
-                           const std::map<Key, Value>& rhs)
-{
-    std::set<Key> keys;
-    for (const auto& entry : lhs)
-        keys.insert(entry.first);
-    for (const auto& entry : rhs)
-        keys.insert(entry.first);
-    return keys;
-}
-} // namespace
-
 AddressSet AddressSet::bottom()
 {
     return AddressSet(false);
@@ -191,18 +175,30 @@ AddressSet AddressDomain::addressSet(Variable variable) const
 {
     if (bottom_)
         return AddressSet::bottom();
-    const auto iterator = values_->find(variable);
-    return iterator == values_->end() ? AddressSet::top() : iterator->second;
+    const AddressSet* value = findValue(variable);
+    return value ? *value : AddressSet::top();
 }
 
 std::vector<Variable> AddressDomain::nonDefaultVariables() const
 {
     std::vector<Variable> variables;
-    variables.reserve(values_->size());
-    for (const auto& [variable, value] : *values_)
+    variables.reserve(size_);
+    if (!paged_)
     {
-        (void)value;
-        variables.push_back(variable);
+        for (const auto& [variable, value] : *smallValues_)
+        {
+            (void)value;
+            variables.push_back(variable);
+        }
+        return variables;
+    }
+    for (const ValuePageEntry& entry : pages_)
+    {
+        for (const std::optional<Value>& value : entry.page->values)
+        {
+            if (value)
+                variables.push_back(value->first);
+        }
     }
     return variables;
 }
@@ -211,8 +207,10 @@ void AddressDomain::assign(Variable variable, AddressSet addresses)
 {
     if (bottom_)
         return;
-    writableValues()[variable] = std::move(addresses);
-    normalize(variable);
+    if (addresses.isTop())
+        eraseValue(variable);
+    else
+        storeValue(variable, std::move(addresses));
 }
 
 void AddressDomain::forget(Variable variable)
@@ -235,18 +233,15 @@ void AddressDomain::joinDomain(const AbstractDomain& other)
         *this = address;
         return;
     }
-    Values next;
-    for (const auto& [variable, value] : *values_)
+    AddressDomain result = top();
+    for (Variable variable : nonDefaultVariables())
     {
-        const auto otherValue = address.values_->find(variable);
-        if (otherValue == address.values_->end())
-            continue;
-        AddressSet joined = value;
-        joined.joinWith(otherValue->second);
+        AddressSet joined = addressSet(variable);
+        joined.joinWith(address.addressSet(variable));
         if (!joined.isTop())
-            next.emplace(variable, std::move(joined));
+            result.assign(variable, std::move(joined));
     }
-    values_ = std::make_shared<Values>(std::move(next));
+    *this = std::move(result);
 }
 
 void AddressDomain::meetDomain(const AbstractDomain& other)
@@ -257,17 +252,22 @@ void AddressDomain::meetDomain(const AbstractDomain& other)
         makeBottom();
         return;
     }
-    const std::set<Variable> variables =
-        combinedKeys(*values_, *address.values_);
-    Values next;
+    AddressDomain result = top();
+    std::vector<Variable> variables = nonDefaultVariables();
+    const std::vector<Variable> otherVariables = address.nonDefaultVariables();
+    variables.insert(variables.end(), otherVariables.begin(),
+                     otherVariables.end());
+    std::sort(variables.begin(), variables.end());
+    variables.erase(std::unique(variables.begin(), variables.end()),
+                    variables.end());
     for (Variable variable : variables)
     {
         AddressSet value = addressSet(variable);
         value.meetWith(address.addressSet(variable));
         if (!value.isTop())
-            next.emplace(variable, std::move(value));
+            result.assign(variable, std::move(value));
     }
-    values_ = std::make_shared<Values>(std::move(next));
+    *this = std::move(result);
 }
 
 void AddressDomain::widenDomain(const AbstractDomain& next)
@@ -287,7 +287,7 @@ bool AddressDomain::isBottomDomain() const
 
 bool AddressDomain::isTopDomain() const
 {
-    return !bottom_ && values_->empty();
+    return !bottom_ && size_ == 0;
 }
 
 bool AddressDomain::leqDomain(const AbstractDomain& other) const
@@ -297,13 +297,12 @@ bool AddressDomain::leqDomain(const AbstractDomain& other) const
         return true;
     if (address.bottom_)
         return false;
-    if (values_ == address.values_ || *values_ == *address.values_)
-        return true;
-    return std::all_of(
-        address.values_->begin(), address.values_->end(),
-        [&](const auto& entry) {
-            return addressSet(entry.first).isSubsetOf(entry.second);
-        });
+    for (Variable variable : address.nonDefaultVariables())
+    {
+        if (!addressSet(variable).isSubsetOf(address.addressSet(variable)))
+            return false;
+    }
+    return true;
 }
 
 std::string AddressDomain::domainToString() const
@@ -313,12 +312,12 @@ std::string AddressDomain::domainToString() const
         return "bottom";
     output << "{";
     bool first = true;
-    for (const auto& [variable, value] : *values_)
+    for (Variable variable : nonDefaultVariables())
     {
         if (!first)
             output << ", ";
         first = false;
-        output << variable.id() << "=" << value.toString();
+        output << variable.id() << "=" << addressSet(variable).toString();
     }
     output << "}";
     return output.str();
@@ -331,24 +330,141 @@ const AddressDomain& AddressDomain::requireAddress(
     return static_cast<const AddressDomain&>(other);
 }
 
-void AddressDomain::normalize(Variable variable)
+const AddressSet* AddressDomain::findValue(Variable variable) const
 {
-    const auto iterator = values_->find(variable);
-    if (iterator != values_->end() && iterator->second.isTop())
-        writableValues().erase(variable);
+    if (!paged_)
+    {
+        const auto iterator = std::lower_bound(
+            smallValues_->begin(), smallValues_->end(), variable,
+            [](const Value& value, Variable key) { return value.first < key; });
+        return iterator != smallValues_->end() && iterator->first == variable
+                   ? &iterator->second
+                   : nullptr;
+    }
+    const std::size_t pageIndex = variable.id() / ValuesPerPage;
+    const auto iterator = std::lower_bound(
+        pages_.begin(), pages_.end(), pageIndex,
+        [](const ValuePageEntry& entry, std::size_t index) {
+            return entry.index < index;
+        });
+    if (iterator == pages_.end() || iterator->index != pageIndex)
+        return nullptr;
+    const std::optional<Value>& value =
+        iterator->page->values[variable.id() % ValuesPerPage];
+    return value && value->first == variable ? &value->second : nullptr;
 }
 
-AddressDomain::Values& AddressDomain::writableValues()
+void AddressDomain::storeValue(Variable variable, AddressSet addresses)
 {
-    if (values_.use_count() != 1)
-        values_ = std::make_shared<Values>(*values_);
-    return *values_;
+    if (!paged_)
+    {
+        SmallValues& values = writableSmallValues();
+        auto iterator = std::lower_bound(
+            values.begin(), values.end(), variable,
+            [](const Value& value, Variable key) { return value.first < key; });
+        if (iterator != values.end() && iterator->first == variable)
+        {
+            iterator->second = std::move(addresses);
+            return;
+        }
+        values.insert(iterator, Value(variable, std::move(addresses)));
+        ++size_;
+        if (size_ > SmallThreshold)
+            promoteToPages();
+        return;
+    }
+    std::optional<Value>& slot =
+        writablePage(variable.id() / ValuesPerPage)
+            .values[variable.id() % ValuesPerPage];
+    if (!slot)
+        ++size_;
+    slot = Value(variable, std::move(addresses));
+}
+
+void AddressDomain::eraseValue(Variable variable)
+{
+    if (!paged_)
+    {
+        SmallValues& values = writableSmallValues();
+        const auto iterator = std::lower_bound(
+            values.begin(), values.end(), variable,
+            [](const Value& value, Variable key) { return value.first < key; });
+        if (iterator != values.end() && iterator->first == variable)
+        {
+            values.erase(iterator);
+            --size_;
+        }
+        return;
+    }
+    const std::size_t pageIndex = variable.id() / ValuesPerPage;
+    auto iterator = std::lower_bound(
+        pages_.begin(), pages_.end(), pageIndex,
+        [](const ValuePageEntry& entry, std::size_t index) {
+            return entry.index < index;
+        });
+    if (iterator == pages_.end() || iterator->index != pageIndex)
+        return;
+    if (iterator->page.use_count() != 1)
+        iterator->page = std::make_shared<ValuePage>(*iterator->page);
+    std::optional<Value>& slot =
+        iterator->page->values[variable.id() % ValuesPerPage];
+    if (!slot || slot->first != variable)
+        return;
+    slot.reset();
+    --size_;
+    if (pageIsEmpty(*iterator->page))
+        pages_.erase(iterator);
+}
+
+void AddressDomain::promoteToPages()
+{
+    if (paged_)
+        return;
+    const SmallValues values = *smallValues_;
+    paged_ = true;
+    size_ = 0;
+    smallValues_ = std::make_shared<SmallValues>();
+    for (const auto& [variable, addresses] : values)
+        storeValue(variable, addresses);
+}
+
+AddressDomain::SmallValues& AddressDomain::writableSmallValues()
+{
+    if (smallValues_.use_count() != 1)
+        smallValues_ = std::make_shared<SmallValues>(*smallValues_);
+    return *smallValues_;
+}
+
+AddressDomain::ValuePage& AddressDomain::writablePage(std::size_t pageIndex)
+{
+    auto iterator = std::lower_bound(
+        pages_.begin(), pages_.end(), pageIndex,
+        [](const ValuePageEntry& entry, std::size_t index) {
+            return entry.index < index;
+        });
+    if (iterator == pages_.end() || iterator->index != pageIndex)
+        iterator = pages_.insert(
+            iterator, {pageIndex, std::make_shared<ValuePage>()});
+    else if (iterator->page.use_count() != 1)
+        iterator->page = std::make_shared<ValuePage>(*iterator->page);
+    return *iterator->page;
+}
+
+bool AddressDomain::pageIsEmpty(const ValuePage& page)
+{
+    return std::none_of(page.values.begin(), page.values.end(),
+                        [](const std::optional<Value>& value) {
+                            return value.has_value();
+                        });
 }
 
 void AddressDomain::makeBottom()
 {
     bottom_ = true;
-    values_ = std::make_shared<Values>();
+    paged_ = false;
+    size_ = 0;
+    smallValues_ = std::make_shared<SmallValues>();
+    pages_.clear();
 }
 
 } // namespace SVF::AbstractDomain

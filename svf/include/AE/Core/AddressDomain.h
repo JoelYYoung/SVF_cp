@@ -6,10 +6,12 @@
 #include "AE/Core/AbstractDomain.h"
 #include "AE/Core/Variable.h"
 
+#include <array>
 #include <cstdint>
-#include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace SVF::AbstractDomain
@@ -129,10 +131,35 @@ public:
     void forget(Variable variable);
 
 private:
-    using Values = std::map<Variable, AddressSet>;
+#ifndef SVF_AE_ADDRESS_VALUES_PER_PAGE
+#define SVF_AE_ADDRESS_VALUES_PER_PAGE 16
+#endif
+#ifndef SVF_AE_ADDRESS_SMALL_THRESHOLD
+#define SVF_AE_ADDRESS_SMALL_THRESHOLD 16
+#endif
+    static constexpr std::size_t ValuesPerPage =
+        SVF_AE_ADDRESS_VALUES_PER_PAGE;
+    static constexpr std::size_t SmallThreshold =
+        SVF_AE_ADDRESS_SMALL_THRESHOLD;
+
+    using Value = std::pair<Variable, AddressSet>;
+    using SmallValues = std::vector<Value>;
+
+    struct ValuePage
+    {
+        std::array<std::optional<Value>, ValuesPerPage> values;
+    };
+
+    struct ValuePageEntry
+    {
+        std::size_t index;
+        std::shared_ptr<ValuePage> page;
+    };
+
+    using ValuePageDirectory = std::vector<ValuePageEntry>;
 
     explicit AddressDomain(bool bottom)
-        : bottom_(bottom), values_(std::make_shared<Values>())
+        : bottom_(bottom), smallValues_(std::make_shared<SmallValues>())
     {
     }
 
@@ -151,12 +178,20 @@ private:
     std::string domainToString() const override;
 
     const AddressDomain& requireAddress(const AbstractDomain& other) const;
-    void normalize(Variable variable);
-    Values& writableValues();
+    const AddressSet* findValue(Variable variable) const;
+    void storeValue(Variable variable, AddressSet addresses);
+    void eraseValue(Variable variable);
+    void promoteToPages();
+    SmallValues& writableSmallValues();
+    ValuePage& writablePage(std::size_t pageIndex);
+    static bool pageIsEmpty(const ValuePage& page);
     void makeBottom();
 
     bool bottom_ = false;
-    std::shared_ptr<Values> values_;
+    bool paged_ = false;
+    std::size_t size_ = 0;
+    std::shared_ptr<SmallValues> smallValues_;
+    ValuePageDirectory pages_;
 };
 
 } // namespace SVF::AbstractDomain
