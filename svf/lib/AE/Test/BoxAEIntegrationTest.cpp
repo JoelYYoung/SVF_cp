@@ -73,6 +73,9 @@ struct StorageObservation
     std::size_t numericalFacts = 0;
     std::size_t numericalPages = 0;
     std::size_t addressFacts = 0;
+    std::size_t addressPages8 = 0;
+    std::size_t addressPages16 = 0;
+    std::size_t addressPages32 = 0;
     std::size_t finitePointees = 0;
     std::size_t largestAddressSet = 0;
     std::vector<std::size_t> addressFactsPerState;
@@ -93,8 +96,14 @@ struct StorageObservation
             state.addresses().nonDefaultVariables();
         addressFacts += pointers.size();
         addressFactsPerState.push_back(pointers.size());
+        std::set<std::uint32_t> pages8;
+        std::set<std::uint32_t> pages16;
+        std::set<std::uint32_t> pages32;
         for (AD::Variable variable : pointers)
         {
+            pages8.insert(variable.id() / 8);
+            pages16.insert(variable.id() / 16);
+            pages32.insert(variable.id() / 32);
             const AD::AddressSet addresses =
                 state.addresses().addressSet(variable);
             if (addresses.isTop())
@@ -104,6 +113,9 @@ struct StorageObservation
             largestAddressSet = std::max(largestAddressSet, addresses.size());
             addressSetSizes.push_back(addresses.size());
         }
+        addressPages8 += pages8.size();
+        addressPages16 += pages16.size();
+        addressPages32 += pages32.size();
     }
 
     std::size_t percentile(double fraction) const
@@ -375,6 +387,9 @@ int main(int argc, char** argv)
                 << " flow_numerical_facts=" << storage.flow.numericalFacts
                 << " flow_numerical_pages=" << storage.flow.numericalPages
                 << " flow_address_facts=" << storage.flow.addressFacts
+                << " flow_address_pages8=" << storage.flow.addressPages8
+                << " flow_address_pages16=" << storage.flow.addressPages16
+                << " flow_address_pages32=" << storage.flow.addressPages32
                 << " flow_address_p50=" << storage.flow.percentile(0.50)
                 << " flow_address_p95=" << storage.flow.percentile(0.95)
                 << " flow_address_p99=" << storage.flow.percentile(0.99)
@@ -390,6 +405,10 @@ int main(int argc, char** argv)
                 << storage.flow.largestAddressSet
                 << " scalar_numerical_facts=" << storage.scalar.numericalFacts
                 << " scalar_address_facts=" << storage.scalar.addressFacts
+                << " scalar_address_pages8=" << storage.scalar.addressPages8
+                << " scalar_address_pages16=" << storage.scalar.addressPages16
+                << " scalar_address_pages32="
+                << storage.scalar.addressPages32
                 << " scalar_finite_pointees="
                 << storage.scalar.finitePointees
                 << " scalar_set_size_p50="
