@@ -19,6 +19,7 @@ FIELDS = (
     "host",
     "input",
     "candidate",
+    "ae_sparsity",
     "phase",
     "repetition",
     "status",
@@ -57,27 +58,29 @@ def labeled_path(value):
 def candidate(value):
     if "=" not in value:
         raise argparse.ArgumentTypeError(
-            "candidate must be LABEL=PERF_RUNNER,HASH_RUNNER,EXTAPI,HASH_STYLE"
+            "candidate must be "
+            "LABEL=PERF_RUNNER,HASH_RUNNER,EXTAPI,HASH_STYLE[,AE_SPARSITY]"
         )
     label, raw_fields = value.split("=", 1)
     fields = raw_fields.split(",")
-    if len(fields) != 4:
+    if len(fields) not in {4, 5}:
         raise argparse.ArgumentTypeError(
-            "candidate must be LABEL=PERF_RUNNER,HASH_RUNNER,EXTAPI,HASH_STYLE"
+            "candidate must be "
+            "LABEL=PERF_RUNNER,HASH_RUNNER,EXTAPI,HASH_STYLE[,AE_SPARSITY]"
         )
-    performance_runner = pathlib.Path(fields[0])
-    hash_runner = pathlib.Path(fields[1])
-    extapi = pathlib.Path(fields[2])
+    performance_runner, hash_runner, extapi = map(pathlib.Path, fields[:3])
     style = fields[3]
+    sparsity = fields[4] if len(fields) == 5 else "semi-sparse"
     if (
         not label
         or not performance_runner.is_file()
         or not hash_runner.is_file()
         or not extapi.is_file()
         or style not in {"injecting", "plain", "none"}
+        or sparsity not in {"dense", "semi-sparse", "sparse"}
     ):
         raise argparse.ArgumentTypeError(f"invalid candidate: {value}")
-    return label, performance_runner, hash_runner, extapi, style
+    return label, performance_runner, hash_runner, extapi, style, sparsity
 
 
 def peak_rss(text):
@@ -97,7 +100,14 @@ def limit_address_space(bytes_limit):
 
 
 def run_once(options, selected, input_path, phase, repetition):
-    label, performance_runner, hash_runner, extapi, hash_style = selected
+    (
+        label,
+        performance_runner,
+        hash_runner,
+        extapi,
+        hash_style,
+        sparsity,
+    ) = selected
     runner = hash_runner if phase == "hash" else performance_runner
     environment = os.environ.copy()
     if phase == "hash":
@@ -112,7 +122,7 @@ def run_once(options, selected, input_path, phase, repetition):
         "TIME_OUTPUT",
         str(runner),
         f"-extapi={extapi}",
-        "-ae-sparsity=semi-sparse",
+        f"-ae-sparsity={sparsity}",
         "-stat=false",
     ]
     if phase == "hash" and hash_style == "plain":
@@ -156,6 +166,7 @@ def run_once(options, selected, input_path, phase, repetition):
     result_row = {
         "host": platform.node(),
         "candidate": label,
+        "ae_sparsity": sparsity,
         "phase": phase,
         "repetition": repetition,
         "status": status,
