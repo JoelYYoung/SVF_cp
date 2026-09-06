@@ -15,26 +15,41 @@
 #include "Util/Options.h"
 #include "WPA/Andersen.h"
 
+#include <string_view>
+#include <vector>
+
 using namespace SVF;
 using namespace SVFUtil;
 
 int main(int argc, char** argv)
 {
-    constexpr int extraArgc = 3;
-    int argNum = 0;
-    char** arguments = new char*[argc + extraArgc];
-    for (; argNum < argc; ++argNum)
-        arguments[argNum] = argv[argNum];
-
-    arguments[argNum++] = const_cast<char*>("-model-consts=true");
-    arguments[argNum++] = const_cast<char*>("-model-arrays=true");
-    arguments[argNum++] = const_cast<char*>("-pre-field-sensitive=false");
-    assert(argNum == argc + extraArgc);
+    std::vector<char*> arguments(argv, argv + argc);
+    arguments.reserve(static_cast<std::size_t>(argc) + 3);
+    const auto hasOption = [&](std::string_view option) {
+        for (int index = 1; index < argc; ++index)
+        {
+            const std::string_view argument(argv[index]);
+            if (argument == option ||
+                (argument.size() > option.size() &&
+                 argument.compare(0, option.size(), option) == 0 &&
+                 argument[option.size()] == '='))
+                return true;
+        }
+        return false;
+    };
+    const auto addDefault = [&](std::string_view option, char* value) {
+        if (!hasOption(option))
+            arguments.push_back(value);
+    };
+    addDefault("-model-consts", const_cast<char*>("-model-consts=true"));
+    addDefault("-model-arrays", const_cast<char*>("-model-arrays=true"));
+    addDefault("-pre-field-sensitive",
+               const_cast<char*>("-pre-field-sensitive=false"));
 
     const std::vector<std::string> modules =
-        OptionBase::parseOptions(argNum, arguments, "Static Symbolic Execution",
+        OptionBase::parseOptions(static_cast<int>(arguments.size()),
+                                 arguments.data(), "Static Symbolic Execution",
                                  "[options] <input-bitcode...>");
-    delete[] arguments;
 
     LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(modules);
     SVFIRBuilder builder;
