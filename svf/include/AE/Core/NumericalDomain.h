@@ -589,7 +589,7 @@ public:
     BoxDomain narrow(const BoxDomain& next) const;
 
 private:
-    static constexpr std::size_t BoundsPerPage = 64;
+    static constexpr std::size_t BoundsPerPage = 8;
 
     struct BoundSlot
     {
