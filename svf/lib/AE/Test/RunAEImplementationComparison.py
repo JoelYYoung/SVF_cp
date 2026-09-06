@@ -74,7 +74,7 @@ def candidate(value):
         or not performance_runner.is_file()
         or not hash_runner.is_file()
         or not extapi.is_file()
-        or style not in {"injecting", "plain"}
+        or style not in {"injecting", "plain", "none"}
     ):
         raise argparse.ArgumentTypeError(f"invalid candidate: {value}")
     return label, performance_runner, hash_runner, extapi, style
@@ -188,6 +188,8 @@ def main():
     options = parser.parse_args()
     if options.repetitions <= 0 or options.timeout <= 0:
         parser.error("repetitions and timeout must be positive")
+    if all(selected[4] == "none" for selected in options.candidate):
+        parser.error("at least one candidate must provide a hash runner")
 
     failures = []
     output_path = pathlib.Path(options.output)
@@ -212,9 +214,14 @@ def main():
             hash_rows = {}
             hash_records = {}
             for phase, repetitions in (("hash", 1), ("performance", options.repetitions)):
+                eligible = [
+                    selected
+                    for selected in options.candidate
+                    if phase != "hash" or selected[4] != "none"
+                ]
                 for repetition in range(1, repetitions + 1):
-                    offset = (input_index + repetition - 1) % len(options.candidate)
-                    order = options.candidate[offset:] + options.candidate[:offset]
+                    offset = (input_index + repetition - 1) % len(eligible)
+                    order = eligible[offset:] + eligible[:offset]
                     for selected in order:
                         result, records = run_once(
                             options, selected, input_path, phase, repetition
@@ -247,9 +254,9 @@ def main():
                                 f"{input_label}/{selected[0]} missing result hash"
                             )
                 if phase == "hash" and differences_writer:
-                    reference = options.candidate[0][0]
+                    reference = eligible[0][0]
                     reference_records = hash_records[reference]
-                    for selected in options.candidate:
+                    for selected in eligible:
                         label = selected[0]
                         candidate_records = hash_records[label]
                         reference_only = sorted(
