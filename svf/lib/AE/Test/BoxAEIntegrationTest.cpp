@@ -260,48 +260,110 @@ std::string canonicalAddressSet(const AD::AddressSet& addresses,
     return result + '}';
 }
 
-/// Hash the analysis result through stable SVF identities rather than the
-/// Box implementation's packed Variable/Location coordinates. The contract
-/// deliberately covers the Box and Address projections under study; storage
-/// layout, page size, pointer identity, and traversal order are unobservable.
+std::string canonicalInterval(const AD::Interval& interval)
+{
+    if (interval.isTop())
+        return "top";
+    if (interval.isBottom())
+        return "bottom";
+    return interval.toString();
+}
+
+void addAnchorVariable(std::map<NodeID, const ValVar*>& variables,
+                       const SVFVar* value)
+{
+    if (const auto* scalar = SVFUtil::dyn_cast<ValVar>(value))
+        variables.emplace(scalar->getId(), scalar);
+}
+
+std::map<NodeID, const ValVar*> anchorVariables(const ICFGNode* node)
+{
+    std::map<NodeID, const ValVar*> variables;
+    for (const SVFStmt* statement : node->getSVFStmts())
+    {
+        if (const auto* assignment =
+                SVFUtil::dyn_cast<AssignStmt>(statement))
+        {
+            addAnchorVariable(variables, assignment->getRHSVar());
+            addAnchorVariable(variables, assignment->getLHSVar());
+        }
+        else if (const auto* multi =
+                     SVFUtil::dyn_cast<MultiOpndStmt>(statement))
+        {
+            addAnchorVariable(variables, multi->getRes());
+            for (const ValVar* operand : multi->getOpndVars())
+                addAnchorVariable(variables, operand);
+            if (const auto* select =
+                    SVFUtil::dyn_cast<SelectStmt>(statement))
+                addAnchorVariable(variables, select->getCondition());
+        }
+        else if (const auto* unary =
+                     SVFUtil::dyn_cast<UnaryOPStmt>(statement))
+        {
+            addAnchorVariable(variables, unary->getOpVar());
+            addAnchorVariable(variables, unary->getRes());
+        }
+        else if (const auto* branch =
+                     SVFUtil::dyn_cast<BranchStmt>(statement))
+        {
+            addAnchorVariable(variables, branch->getCondition());
+            addAnchorVariable(variables, branch->getBranchInst());
+        }
+    }
+    return variables;
+}
+
+std::map<NodeID, const ObjVar*> anchorMemoryObjects(
+    const SVFIR& graph, AndersenWaveDiff& pointerAnalysis,
+    const ICFGNode* node)
+{
+    std::map<NodeID, const ObjVar*> objects;
+    for (const SVFStmt* statement : node->getSVFStmts())
+    {
+        const ValVar* pointer = nullptr;
+        if (const auto* load = SVFUtil::dyn_cast<LoadStmt>(statement))
+            pointer = load->getRHSVar();
+        else if (const auto* store =
+                     SVFUtil::dyn_cast<StoreStmt>(statement))
+            pointer = store->getLHSVar();
+        if (!pointer)
+            continue;
+        for (NodeID objectId : pointerAnalysis.getPts(pointer->getId()))
+        {
+            if (const auto* object =
+                    SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(objectId)))
+                objects.emplace(objectId, object);
+        }
+    }
+    return objects;
+}
+
+/// Hash representation-independent answers at stable semantic query anchors.
+/// Anchors come only from the common SVFIR and Andersen points-to solution;
+/// neither a Box page nor an upstream trace entry can create a record.
 ResultChecksum resultChecksum(const SVFIR& graph,
-                              AbstractInterpretation& analysis)
+                              AbstractInterpretation& analysis,
+                              AndersenWaveDiff& pointerAnalysis)
 {
     SVFIRAdapter adapter(graph);
     std::vector<std::string> records;
-    auto numericalRecord = [&](const char* carrier, NodeID point, NodeID id,
+    auto numericalRecord = [&](const char* kind, NodeID point, NodeID id,
                                const AD::Interval& value) {
-        records.push_back(std::string(carrier) + '|' + std::to_string(point) +
-                          '|' + std::to_string(id) + "|N|" + value.toString());
+        records.push_back(std::string(kind) + '|' + std::to_string(point) +
+                          '|' + std::to_string(id) + "|N|" +
+                          canonicalInterval(value));
     };
-    auto addressRecord = [&](const char* carrier, NodeID point, NodeID id,
+    auto addressRecord = [&](const char* kind, NodeID point, NodeID id,
                              const AD::AddressSet& value) {
-        records.push_back(std::string(carrier) + '|' + std::to_string(point) +
+        records.push_back(std::string(kind) + '|' + std::to_string(point) +
                           '|' + std::to_string(id) + "|A|" +
                           canonicalAddressSet(value, adapter));
     };
 
-    if (const AD::AbstractDomain* property = analysis.getScalarAbstractState())
-    {
-        const BoxProgramState& scalar = requireBoxState(*property);
-        if (scalar.isBottom())
-            records.emplace_back("S|bottom");
-        for (AD::Variable variable : scalar.numerical().constrainedVariables())
-        {
-            if (const ValVar* value = adapter.value(variable))
-                numericalRecord("S", 0, value->getId(),
-                                scalar.numerical().bound(variable));
-        }
-        for (AD::Variable variable : scalar.addresses().nonDefaultVariables())
-        {
-            if (const ValVar* value = adapter.value(variable))
-                addressRecord("S", 0, value->getId(),
-                              scalar.addresses().addressSet(variable));
-        }
-    }
-
-    std::vector<const ICFGNode*> nodes(analysis.getAnalyzedNodes().begin(),
-                                       analysis.getAnalyzedNodes().end());
+    std::vector<const ICFGNode*> nodes;
+    for (auto iterator = graph.getICFG()->begin();
+         iterator != graph.getICFG()->end(); ++iterator)
+        nodes.push_back(iterator->second);
     std::sort(nodes.begin(), nodes.end(),
               [](const ICFGNode* lhs, const ICFGNode* rhs) {
                   return lhs->getId() < rhs->getId();
@@ -309,25 +371,59 @@ ResultChecksum resultChecksum(const SVFIR& graph,
     for (const ICFGNode* node : nodes)
     {
         const NodeID point = node->getId();
-        records.push_back("R|" + std::to_string(point));
-        const BoxProgramState& state =
-            requireBoxState(analysis.getAbstractState(node));
-        if (state.isBottom())
-        {
-            records.push_back("M|" + std::to_string(point) + "|bottom");
+        const bool reachable = analysis.hasAbsState(node);
+        records.push_back("R|" + std::to_string(point) + '|' +
+                          (reachable ? '1' : '0'));
+        if (!reachable)
             continue;
-        }
-        for (AD::Variable variable : state.numerical().constrainedVariables())
+
+        for (const auto& [id, value] : anchorVariables(node))
         {
-            if (const ObjVar* object = adapter.contentObject(variable))
-                numericalRecord("M", point, object->getId(),
-                                state.numerical().bound(variable));
+            if (id == IRGraph::NullPtr || id == graph.getBlkPtr())
+                continue;
+            if (value->isPointer())
+            {
+                const AD::AddressSet answer = analysis.hasAbsValue(value, node)
+                                                  ? analysis.getAddressSet(
+                                                        value, node)
+                                                  : AD::AddressSet::top();
+                addressRecord("V", point, id, answer);
+            }
+            else
+            {
+                const AD::Interval answer = analysis.hasAbsValue(value, node)
+                                                ? analysis.getInterval(value,
+                                                                       node)
+                                                : AD::Interval::top();
+                numericalRecord("V", point, id, answer);
+            }
         }
-        for (AD::Variable variable : state.addresses().nonDefaultVariables())
+
+        for (const auto& [id, object] :
+             anchorMemoryObjects(graph, pointerAnalysis, node))
         {
-            if (const ObjVar* object = adapter.contentObject(variable))
-                addressRecord("M", point, object->getId(),
-                              state.addresses().addressSet(variable));
+            if (object->isPointer())
+            {
+                const AD::AddressSet answer = analysis.hasAbsValue(object, node)
+                                                  ? analysis.getAddressSet(
+                                                        object, node)
+                                                  : AD::AddressSet::top();
+                addressRecord("M", point, id, answer);
+            }
+            else
+            {
+                const AD::Interval answer = analysis.hasAbsValue(object, node)
+                                                ? analysis.getInterval(object,
+                                                                       node)
+                                                : AD::Interval::top();
+                numericalRecord("M", point, id, answer);
+            }
+            records.push_back(
+                "F|" + std::to_string(point) + '|' + std::to_string(id) +
+                '|' +
+                (analysis.isFreedMemory(analysis.locationOf(object), node)
+                     ? '1'
+                     : '0'));
         }
     }
 
@@ -572,11 +668,12 @@ int main(int argc, char** argv)
                   << analysis.getAnalyzedNodes().size() << '\n';
         if (std::getenv("SVF_AE_SEMANTIC_CHECKSUM"))
         {
-            const ResultChecksum result = resultChecksum(*graph, analysis);
+            const ResultChecksum result =
+                resultChecksum(*graph, analysis, *ander);
             std::cout << "AE_RESULT_HASH fnv1a64=" << std::hex << std::setw(16)
                       << std::setfill('0') << result.value << std::dec
                       << " records=" << result.records
-                      << " contract=svf-id-box-address-v1\n";
+                      << " contract=svf-query-projection-v2\n";
             std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
                       << std::setw(16) << std::setfill('0')
                       << semanticChecksum(analysis) << std::dec << '\n';
