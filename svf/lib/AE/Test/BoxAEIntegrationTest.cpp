@@ -673,7 +673,7 @@ int main(int argc, char** argv)
             std::cout << "AE_RESULT_HASH fnv1a64=" << std::hex << std::setw(16)
                       << std::setfill('0') << result.value << std::dec
                       << " records=" << result.records
-                      << " contract=svf-query-projection-v2\n";
+                      << " contract=svf-query-projection-v3\n";
             std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
                       << std::setw(16) << std::setfill('0')
                       << semanticChecksum(analysis) << std::dec << '\n';
