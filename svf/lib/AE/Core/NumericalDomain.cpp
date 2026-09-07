@@ -2788,9 +2788,51 @@ void BoxDomain::joinDomain(const AbstractDomain& other)
         *this = box;
         return;
     }
-    for (Variable variable : boundedVariables())
-        setBound(variable,
-                 joinIntervals(boundAt(variable), box.boundAt(variable)));
+
+    BoundPageDirectory joinedPages;
+    joinedPages.reserve(std::min(boundPages_.size(),
+                                 box.boundPages_.size()));
+    auto otherPage = box.boundPages_.begin();
+    for (const BoundPageEntry& entry : boundPages_)
+    {
+        while (otherPage != box.boundPages_.end() &&
+               otherPage->index < entry.index)
+            ++otherPage;
+        if (otherPage == box.boundPages_.end() ||
+            otherPage->index != entry.index)
+        {
+            // Missing slots denote Top, so this entire page joins to Top.
+            continue;
+        }
+        if (entry.page == otherPage->page)
+        {
+            // COW identity proves every slot is equal without inspecting it.
+            joinedPages.push_back(entry);
+            continue;
+        }
+
+        auto joined = std::make_shared<BoundPage>(*entry.page);
+        for (std::size_t slot = 0; slot < BoundsPerPage; ++slot)
+        {
+            std::optional<BoundSlot>& left = joined->bounds[slot];
+            const std::optional<BoundSlot>& right =
+                otherPage->page->bounds[slot];
+            if (!left)
+                continue;
+            if (!right || left->variable != right->variable)
+            {
+                left.reset();
+                continue;
+            }
+            left->interval =
+                joinIntervals(left->interval, right->interval);
+            if (left->interval.isTop())
+                left.reset();
+        }
+        if (!pageIsEmpty(*joined))
+            joinedPages.push_back({entry.index, std::move(joined)});
+    }
+    boundPages_ = std::move(joinedPages);
 }
 
 void BoxDomain::meetDomain(const AbstractDomain& other)

@@ -249,6 +249,33 @@ void testPagedCopyOnWriteAndSerialization()
                 hasBounds(copy.bound(distant), Rational(9), Rational(11)),
             "paged Box COW mutated a source or detached unrelated data");
 
+    BoxDomain sharedPages = BoxDomain::top();
+    for (const Variable variable : variables)
+        sharedPages.assign(variable, LinearExpression(Rational(5)));
+    BoxDomain identicalJoin = sharedPages;
+    identicalJoin.joinWith(sharedPages);
+    require(identicalJoin.isEquivalentTo(sharedPages) == CheckResult::True,
+            "page-identity Box join changed a shared state");
+
+    BoxDomain oneChanged = sharedPages;
+    oneChanged.assign(first, LinearExpression(Rational(7)));
+    BoxDomain partialJoin = sharedPages;
+    partialJoin.joinWith(oneChanged);
+    require(hasBounds(partialJoin.bound(first), Rational(5), Rational(7)) &&
+                hasBounds(partialJoin.bound(variables[200]), Rational(5),
+                          Rational(5)),
+            "page-wise Box join lost a changed or shared page");
+
+    const Variable samePage(first.id() + 1);
+    BoxDomain disjointSlot = BoxDomain::top();
+    disjointSlot.assign(samePage, LinearExpression(Rational(5)));
+    BoxDomain missingSlotJoin = original;
+    missingSlotJoin.joinWith(disjointSlot);
+    require(missingSlotJoin.bound(first).isTop() &&
+                missingSlotJoin.bound(samePage).isTop() &&
+                missingSlotJoin.bound(distant).isTop(),
+            "page-wise Box join did not treat missing slots as Top");
+
     const NumericalDomain::RawBuffer raw = original.serializeRaw();
     std::unique_ptr<NumericalDomain> restored =
         NumericalDomain::deserializeRaw(raw);
