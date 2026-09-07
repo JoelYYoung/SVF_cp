@@ -43,6 +43,8 @@ protected:
     struct SparsePhaseProfile
     {
         PhaseMetric total;
+        PhaseMetric globalInitialization;
+        PhaseMetric statementTransfer;
         PhaseMetric stateCopy;
         PhaseMetric stateMerge;
         PhaseMetric stateJoin;
@@ -70,6 +72,7 @@ protected:
                      const AbstractDomain::AddressSet& addresses,
                      const ICFGNode* node) override;
     using Base::updateValue;
+    void handleSVFStatement(const SVFStmt* statement) override;
 
     void copyAbstractState(const ICFGNode* source,
                            const ICFGNode* destination) override;

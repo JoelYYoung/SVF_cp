@@ -97,8 +97,18 @@ const AD::AbstractDomain* NativeSemiSparseAbstractInterpretation::
 
 void NativeSemiSparseAbstractInterpretation::handleGlobalNode()
 {
+    PhaseTimer timer(sparseProfile_.globalInitialization,
+                     Options::AESparseProfile());
     Base::handleGlobalNode();
     finalizeAbstractState(this->icfg->getGlobalICFGNode());
+}
+
+void NativeSemiSparseAbstractInterpretation::handleSVFStatement(
+    const SVFStmt* statement)
+{
+    PhaseTimer timer(sparseProfile_.statementTransfer,
+                     Options::AESparseProfile());
+    Base::handleSVFStatement(statement);
 }
 
 void NativeSemiSparseAbstractInterpretation::runOnModule()
@@ -134,6 +144,8 @@ void NativeSemiSparseAbstractInterpretation::reportSparseProfile() const
                   << nanosecondsPerCall << '\n';
     };
     report("total", sparseProfile_.total);
+    report("global-initialization", sparseProfile_.globalInitialization);
+    report("statement-transfer", sparseProfile_.statementTransfer);
     report("state-copy", sparseProfile_.stateCopy);
     report("state-merge", sparseProfile_.stateMerge);
     report("state-join", sparseProfile_.stateJoin);
