@@ -144,8 +144,7 @@ bool DenseAbstractInterpretation::hasAbsState(const ICFGNode* node) const
 
 AD::Location DenseAbstractInterpretation::locationOf(const ObjVar* object) const
 {
-    return object && adapter_.contains(*object) ? adapter_.location(*object)
-                                                : AD::Location::null();
+    return object ? adapter_.location(*object) : AD::Location::null();
 }
 
 const ObjVar* DenseAbstractInterpretation::objectAt(AD::Location location) const

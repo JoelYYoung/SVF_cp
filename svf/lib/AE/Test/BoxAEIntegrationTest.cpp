@@ -370,6 +370,26 @@ void validateDynamicObjectRegistration(SVFIR& graph)
     }
 }
 
+void validateDynamicAnalysisRegistration(
+    SVFIR& graph, AbstractInterpretation& analysis)
+{
+    const ObjVar* seed = nullptr;
+    for (auto iterator = graph.begin(); iterator != graph.end(); ++iterator)
+    {
+        if ((seed = SVFUtil::dyn_cast<ObjVar>(iterator->second)))
+            break;
+    }
+    if (!seed)
+        throw std::runtime_error(
+            "dynamic analysis fixture has no seed object");
+
+    const NodeID id = graph.addDummyObjNode(seed->getType());
+    const auto* object = SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(id));
+    if (!object || analysis.locationOf(object).isNull())
+        throw std::runtime_error(
+            "analysis mapped a dynamically created object to null");
+}
+
 /// Hash representation-independent answers at stable semantic query anchors.
 /// Anchors come only from the common SVFIR and Andersen points-to solution;
 /// neither a Box page nor an upstream trace entry can create a record.
@@ -691,6 +711,8 @@ int main(int argc, char** argv)
         AbstractInterpretation& analysis =
             AbstractInterpretation::getAEInstance();
         analysis.runOnModule();
+        if (std::getenv("SVF_AE_VALIDATE_DYNAMIC_ADAPTER"))
+            validateDynamicAnalysisRegistration(*graph, analysis);
         validateAuthoritativeStorage(analysis);
         if (std::getenv("SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT"))
             validateVariableIdLayout(*graph);
