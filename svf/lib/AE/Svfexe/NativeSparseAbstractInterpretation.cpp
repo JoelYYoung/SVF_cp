@@ -768,7 +768,7 @@ void NativeFullSparseAbstractInterpretation::propagateAndApplyMemoryRefinement(
     {
         const auto* object =
             SVFUtil::dyn_cast<ObjVar>(this->svfir->getGNode(objectId));
-        if (!object || !this->adapter_.contains(*object))
+        if (!object)
             continue;
         const AD::Variable content = this->adapter_.contentVariable(*object);
         if (!object->isPointer())

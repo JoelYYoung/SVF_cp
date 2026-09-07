@@ -321,26 +321,35 @@ std::map<NodeID, const ValVar*> anchorVariables(const ICFGNode* node)
     return variables;
 }
 
-std::map<NodeID, const ObjVar*> anchorMemoryObjects(
+using MemoryQuery = std::pair<NodeID, bool>;
+
+std::map<MemoryQuery, const ObjVar*> anchorMemoryObjects(
     const SVFIR& graph, AndersenWaveDiff& pointerAnalysis,
     const ICFGNode* node)
 {
-    std::map<NodeID, const ObjVar*> objects;
+    std::map<MemoryQuery, const ObjVar*> objects;
     for (const SVFStmt* statement : node->getSVFStmts())
     {
         const ValVar* pointer = nullptr;
+        bool pointerContent = false;
         if (const auto* load = SVFUtil::dyn_cast<LoadStmt>(statement))
+        {
             pointer = load->getRHSVar();
+            pointerContent = load->getLHSVar()->isPointer();
+        }
         else if (const auto* store =
                      SVFUtil::dyn_cast<StoreStmt>(statement))
+        {
             pointer = store->getLHSVar();
+            pointerContent = store->getRHSVar()->isPointer();
+        }
         if (!pointer)
             continue;
         for (NodeID objectId : pointerAnalysis.getPts(pointer->getId()))
         {
             if (const auto* object =
                     SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(objectId)))
-                objects.emplace(objectId, object);
+                objects.emplace(MemoryQuery{objectId, pointerContent}, object);
         }
     }
     return objects;
@@ -482,10 +491,11 @@ ResultChecksum resultChecksum(const SVFIR& graph,
             }
         }
 
-        for (const auto& [id, object] :
+        for (const auto& [query, object] :
              anchorMemoryObjects(graph, pointerAnalysis, node))
         {
-            if (object->isPointer())
+            const auto [id, pointerContent] = query;
+            if (pointerContent)
             {
                 const AD::AddressSet answer = analysis.hasAbsValue(object, node)
                                                   ? analysis.getAddressSet(
@@ -762,7 +772,7 @@ int main(int argc, char** argv)
             std::cout << "AE_RESULT_HASH fnv1a64=" << std::hex << std::setw(16)
                       << std::setfill('0') << result.value << std::dec
                       << " records=" << result.records
-                      << " contract=svf-query-projection-v3\n";
+                      << " contract=svf-query-projection-v4\n";
             std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
                       << std::setw(16) << std::setfill('0')
                       << semanticChecksum(analysis) << std::dec << '\n';

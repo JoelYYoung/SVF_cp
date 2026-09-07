@@ -48,6 +48,9 @@ if(TARGET SvfLLVM)
               -ae-sparsity=${sparsity}
               -widen-delay=1
               -stat=false
+              -model-consts=true
+              -model-arrays=true
+              -pre-field-sensitive=false
               -extapi=${CMAKE_BINARY_DIR}/lib/extapi.bc
               ${CMAKE_CURRENT_LIST_DIR}/${fixture}
     )
@@ -79,7 +82,10 @@ if(TARGET SvfLLVM)
     set_tests_properties(
       box-ae-global-gep-initializer-${sparsity}
       PROPERTIES
-        ENVIRONMENT "SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS=1"
+        ENVIRONMENT
+          "SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS=1;SVF_AE_SEMANTIC_CHECKSUM=1"
+        PASS_REGULAR_EXPRESSION
+          "AE_RESULT_HASH fnv1a64=2b0eeb6b890ec8d6 records=74 contract=svf-query-projection-v4"
     )
   endforeach()
   add_box_ae_test(
@@ -98,7 +104,7 @@ if(TARGET SvfLLVM)
       ENVIRONMENT
         "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1;SVF_AE_SEMANTIC_CHECKSUM=1"
       PASS_REGULAR_EXPRESSION
-        "AE_RESULT_HASH fnv1a64=[0-9a-f]+ records=[0-9]+ contract=svf-query-projection-v3"
+        "AE_RESULT_HASH fnv1a64=[0-9a-f]+ records=[0-9]+ contract=svf-query-projection-v4"
   )
 endif()
 

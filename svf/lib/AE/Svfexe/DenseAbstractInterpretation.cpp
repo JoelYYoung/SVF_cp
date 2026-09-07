@@ -104,8 +104,7 @@ void DenseAbstractInterpretation::initializeObjectValue(
     interval = AD::Interval::bottom();
     addresses = AD::AddressSet::bottom();
     DenseState& denseState = ensureState(node);
-    if (adapter_.contains(*object))
-        denseState.allocate(adapter_.location(*object));
+    denseState.allocate(adapter_.location(*object));
 
     const BaseObjVar* base = PAG::getPAG()->getBaseObject(object->getId());
     if (base->isConstDataOrConstGlobal() || base->isConstantArray() ||
@@ -125,10 +124,7 @@ void DenseAbstractInterpretation::initializeObjectValue(
         if (!interval.isBottom() || !addresses.isBottom())
             return;
     }
-    if (adapter_.contains(*object))
-        addresses = AD::AddressSet::singleton(adapter_.location(*object));
-    else
-        addresses = AD::AddressSet::top();
+    addresses = AD::AddressSet::singleton(adapter_.location(*object));
 }
 
 const AbstractDomain::AbstractDomain& DenseAbstractInterpretation::
@@ -305,6 +301,17 @@ void DenseAbstractInterpretation::assignValue(DenseState& denseState,
     denseState.addresses().forget(variable);
 }
 
+void DenseAbstractInterpretation::assignMemoryValue(
+    DenseState& denseState, AD::Variable content,
+    const AD::Interval& interval, const AD::AddressSet& addresses)
+{
+    if (interval.isBottom())
+        denseState.numerical().forget(content);
+    else
+        assignInterval(denseState, content, interval);
+    denseState.addresses().assign(content, addresses);
+}
+
 void DenseAbstractInterpretation::materializeValue(DenseState&, const ValVar*,
                                                    const ICFGNode*)
 {
@@ -335,12 +342,9 @@ AD::Interval DenseAbstractInterpretation::getInterval(const ValVar* var,
 AD::Interval DenseAbstractInterpretation::getInterval(const ObjVar* var,
                                                       const ICFGNode* node)
 {
-    if (!adapter_.contains(*var))
-        return AD::Interval::bottom();
     const DenseState& denseState = ensureState(node);
     const AD::Variable content = adapter_.contentVariable(*var);
-    return var->isPointer() ? AD::Interval::bottom()
-                            : denseState.numerical().bound(content);
+    return denseState.numerical().bound(content);
 }
 
 AD::Interval DenseAbstractInterpretation::getInterval(const SVFVar* var,
@@ -368,10 +372,6 @@ AD::AddressSet DenseAbstractInterpretation::getAddressSet(const ValVar* var,
 AD::AddressSet DenseAbstractInterpretation::getAddressSet(const ObjVar* var,
                                                           const ICFGNode* node)
 {
-    if (!adapter_.contains(*var))
-        return AD::AddressSet::bottom();
-    if (!var->isPointer())
-        return AD::AddressSet::bottom();
     const DenseState& denseState = ensureState(node);
     const AD::Variable content = adapter_.contentVariable(*var);
     return denseState.addresses().addressSet(content);
@@ -398,7 +398,8 @@ bool DenseAbstractInterpretation::hasAbsValue(const ValVar* var,
 bool DenseAbstractInterpretation::hasAbsValue(const ObjVar* var,
                                               const ICFGNode* node) const
 {
-    return denseTrace_.count(node) != 0 && adapter_.contains(*var);
+    (void)var;
+    return denseTrace_.count(node) != 0;
 }
 
 bool DenseAbstractInterpretation::hasAbsValue(const SVFVar* var,
@@ -426,9 +427,8 @@ void DenseAbstractInterpretation::updateValue(const ObjVar* var,
                                               const AD::AddressSet& addresses,
                                               const ICFGNode* node)
 {
-    if (adapter_.contains(*var))
-        assignValue(ensureState(node), adapter_.contentVariable(*var), interval,
-                    addresses);
+    assignMemoryValue(ensureState(node), adapter_.contentVariable(*var),
+                      interval, addresses);
 }
 
 AD::Interval DenseAbstractInterpretation::getMemoryInterval(
@@ -554,14 +554,15 @@ void DenseAbstractInterpretation::storeValue(const ValVar* pointer,
             return;
         if (strong)
         {
-            assignValue(denseState, content, interval, addresses);
+            assignMemoryValue(denseState, content, interval, addresses);
             return;
         }
         AD::Interval joinedInterval = getInterval(object, node);
         AD::AddressSet joinedAddresses = getAddressSet(object, node);
         joinedInterval.joinWith(interval);
         joinedAddresses.joinWith(addresses);
-        assignValue(denseState, content, joinedInterval, joinedAddresses);
+        assignMemoryValue(denseState, content, joinedInterval,
+                          joinedAddresses);
     };
 
     if (pointees.isTop())
@@ -688,7 +689,7 @@ void DenseAbstractInterpretation::recordBranchRefinement(
     AD::AbstractDomain& abstractState, const ICFGNode*, const ICFGNode*)
 {
     const auto* object = SVFUtil::dyn_cast<ObjVar>(svfir->getGNode(objectId));
-    if (!object || !adapter_.contains(*object))
+    if (!object)
         return;
 
     DenseState& denseState = static_cast<DenseState&>(abstractState);
@@ -697,7 +698,7 @@ void DenseAbstractInterpretation::recordBranchRefinement(
         return;
     AD::Interval refined = denseState.numerical().bound(content);
     refined.meetWith(narrowed);
-    assignValue(denseState, content, refined, AD::AddressSet::bottom());
+    assignInterval(denseState, content, refined);
 }
 
 bool DenseAbstractInterpretation::isBranchEdgeFeasibleAt(

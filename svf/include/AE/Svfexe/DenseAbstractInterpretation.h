@@ -122,6 +122,10 @@ protected:
     void assignValue(DenseState& state, AbstractDomain::Variable variable,
                      const AbstractDomain::Interval& interval,
                      const AbstractDomain::AddressSet& addresses);
+    void assignMemoryValue(DenseState& state,
+                           AbstractDomain::Variable content,
+                           const AbstractDomain::Interval& interval,
+                           const AbstractDomain::AddressSet& addresses);
     void assignInterval(DenseState& state, AbstractDomain::Variable variable,
                         const AbstractDomain::Interval& interval);
     void constrainInterval(DenseState& state, AbstractDomain::Variable variable,

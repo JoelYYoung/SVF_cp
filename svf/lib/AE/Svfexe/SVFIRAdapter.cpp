@@ -52,9 +52,6 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
             // must retain their computed AddressSet.
             if (!pointers && value->isConstDataOrAggDataButNotNullPtr())
                 continue;
-            if (!pointers && !SVFUtil::isa<SVFIntegerType>(value->getType()))
-                continue;
-
             const Variable variable = nextVariable(nextVariableId_);
             variables_.emplace(value, variable);
             valuesByVariableId_.resize(variable.id() + 1);
