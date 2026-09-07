@@ -4,6 +4,7 @@
 
 import argparse
 import csv
+import fractions
 import os
 import pathlib
 import platform
@@ -52,6 +53,10 @@ DIFFERENCE_FIELDS = (
     "freed_differences",
     "reference_top_candidate_non_top",
     "reference_non_top_candidate_top",
+    "candidate_superset_answers",
+    "candidate_subset_answers",
+    "incomparable_answers",
+    "unclassified_answers",
     "first_different_query",
     "first_reference_answer",
     "first_candidate_answer",
@@ -70,6 +75,7 @@ QUERY_DIFFERENCE_FIELDS = (
     "difference",
     "reference_answer",
     "candidate_answer",
+    "lattice_relation",
 )
 
 
@@ -100,6 +106,110 @@ def difference_kind(key):
     if fields[0] in {"R", "F"}:
         return fields[0]
     return fields[3]
+
+
+def parse_interval(answer):
+    if answer in {"bottom", "top"}:
+        return answer
+    match = re.fullmatch(r"([\[(])(.+), (.+)([\])])", answer)
+    if not match:
+        raise ValueError(f"malformed interval: {answer}")
+
+    def endpoint(value):
+        if value in {"-inf", "-oo", "+inf", "inf", "+oo", "oo"}:
+            return value[0] if value[0] in {"-", "+"} else "+"
+        return fractions.Fraction(value)
+
+    return (
+        endpoint(match.group(2)),
+        endpoint(match.group(3)),
+        match.group(1) == "(",
+        match.group(4) == ")",
+    )
+
+
+def parse_address_set(answer):
+    if answer in {"bottom", "top"}:
+        return answer
+    if not answer.startswith("{") or not answer.endswith("}"):
+        raise ValueError(f"malformed address set: {answer}")
+    contents = answer[1:-1]
+    locations = set()
+    position = 0
+    while position < len(contents):
+        colon = contents.find(":", position)
+        if colon < 0:
+            raise ValueError(f"malformed address element: {answer}")
+        length = int(contents[position:colon])
+        begin = colon + 1
+        end = begin + length
+        if end > len(contents):
+            raise ValueError(f"truncated address element: {answer}")
+        locations.add(contents[begin:end])
+        position = end
+        if position < len(contents):
+            if contents[position] != ",":
+                raise ValueError(f"malformed address separator: {answer}")
+            position += 1
+    return locations
+
+
+def abstract_subset(left, right, kind):
+    """Whether one canonical numeric/address answer is below another."""
+    left = parse_interval(left) if kind == "N" else parse_address_set(left)
+    right = parse_interval(right) if kind == "N" else parse_address_set(right)
+    if left == "bottom" or right == "top":
+        return True
+    if left == "top" or right == "bottom":
+        return left == right
+    if kind == "A":
+        return left <= right
+
+    left_lower, left_upper, left_lower_strict, left_upper_strict = left
+    right_lower, right_upper, right_lower_strict, right_upper_strict = right
+    lower_contained = right_lower == "-" or (
+        left_lower != "-"
+        and (
+            left_lower > right_lower
+            or (
+                left_lower == right_lower
+                and (not right_lower_strict or left_lower_strict)
+            )
+        )
+    )
+    upper_contained = right_upper == "+" or (
+        left_upper != "+"
+        and (
+            left_upper < right_upper
+            or (
+                left_upper == right_upper
+                and (not right_upper_strict or left_upper_strict)
+            )
+        )
+    )
+    return lower_contained and upper_contained
+
+
+def lattice_relation(key, reference_answer, candidate_answer):
+    kind = difference_kind(key)
+    if kind not in {"N", "A"}:
+        return "not-applicable"
+    try:
+        reference_subset = abstract_subset(
+            reference_answer, candidate_answer, kind
+        )
+        candidate_subset = abstract_subset(
+            candidate_answer, reference_answer, kind
+        )
+    except (ValueError, ZeroDivisionError):
+        return "unclassified"
+    if reference_subset and candidate_subset:
+        return "equal"
+    if reference_subset:
+        return "candidate-superset"
+    if candidate_subset:
+        return "candidate-subset"
+    return "incomparable"
 
 
 def labeled_path(value):
@@ -402,6 +512,26 @@ def main():
                                 and candidate_queries[key] == "top"
                                 for key in different_queries
                             )
+                            relations = {
+                                key: lattice_relation(
+                                    key,
+                                    reference_queries[key],
+                                    candidate_queries[key],
+                                )
+                                for key in different_queries
+                            }
+                            relation_counts = {
+                                relation: sum(
+                                    value == relation
+                                    for value in relations.values()
+                                )
+                                for relation in (
+                                    "candidate-superset",
+                                    "candidate-subset",
+                                    "incomparable",
+                                    "unclassified",
+                                )
+                            }
                             reference_only = sorted(
                                 set(reference_records) - set(candidate_records)
                             )
@@ -418,6 +548,16 @@ def main():
                             }
                             reference_top_candidate_non_top = 0
                             reference_non_top_candidate_top = 0
+                            relations = {}
+                            relation_counts = {
+                                relation: 0
+                                for relation in (
+                                    "candidate-superset",
+                                    "candidate-subset",
+                                    "incomparable",
+                                    "unclassified",
+                                )
+                            }
                             reference_only = []
                             candidate_only = []
                         differences_writer.writerow(
@@ -477,6 +617,26 @@ def main():
                                 ),
                                 "reference_non_top_candidate_top": (
                                     reference_non_top_candidate_top
+                                    if comparable
+                                    else ""
+                                ),
+                                "candidate_superset_answers": (
+                                    relation_counts["candidate-superset"]
+                                    if comparable
+                                    else ""
+                                ),
+                                "candidate_subset_answers": (
+                                    relation_counts["candidate-subset"]
+                                    if comparable
+                                    else ""
+                                ),
+                                "incomparable_answers": (
+                                    relation_counts["incomparable"]
+                                    if comparable
+                                    else ""
+                                ),
+                                "unclassified_answers": (
+                                    relation_counts["unclassified"]
                                     if comparable
                                     else ""
                                 ),
@@ -554,6 +714,13 @@ def main():
                                         "difference": difference,
                                         "reference_answer": reference_answer,
                                         "candidate_answer": candidate_answer,
+                                        "lattice_relation": (
+                                            relations.get(
+                                                key, "not-applicable"
+                                            )
+                                            if difference == "answer-different"
+                                            else "not-applicable"
+                                        ),
                                     }
                                 )
                     differences_file.flush()

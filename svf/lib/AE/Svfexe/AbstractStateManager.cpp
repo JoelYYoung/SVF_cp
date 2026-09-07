@@ -33,6 +33,23 @@ AD::Interval finiteInterval(s64_t lower, s64_t upper)
     return AD::Interval::closed(AD::Rational(lower), AD::Rational(upper));
 }
 
+bool constantInterval(const ValVar* value, AD::Interval& interval)
+{
+    if (const auto* integer = SVFUtil::dyn_cast<ConstIntValVar>(value))
+    {
+        interval =
+            AD::Interval::singleton(AD::Rational(integer->getSExtValue()));
+        return true;
+    }
+    if (const auto* floating = SVFUtil::dyn_cast<ConstFPValVar>(value))
+    {
+        interval = AD::Interval::singleton(
+            AD::Rational::fromDouble(floating->getFPValue()));
+        return true;
+    }
+    return false;
+}
+
 } // namespace
 
 const AD::AbstractDomain* AbstractInterpretation::getScalarAbstractState() const
@@ -195,14 +212,53 @@ AD::AddressSet AbstractInterpretation::getGepObjAddrs(
     const AD::AddressSet bases = getAddressSet(pointer, node);
     if (bases.isTop())
         return AD::AddressSet::top();
+    if (offset.isBottom())
+        return AD::AddressSet::bottom();
 
-    const APOffset lower = static_cast<APOffset>(std::clamp<s64_t>(
-        finiteEndpoint(offset.lower(), 0), 0, Options::MaxFieldLimit()));
-    const APOffset upper = static_cast<APOffset>(std::clamp<s64_t>(
-        finiteEndpoint(offset.upper(), Options::MaxFieldLimit()), 0,
-        Options::MaxFieldLimit()));
+    auto integerEndpoint = [](const AD::Bound& bound,
+                              bool lower) -> std::optional<APOffset> {
+        if (!bound.isFinite())
+            return std::nullopt;
+        const AD::Rational integer =
+            lower ? (bound.isStrict() ? bound.value().floor() + AD::Rational(1)
+                                      : bound.value().ceil())
+                  : (bound.isStrict() ? bound.value().ceil() - AD::Rational(1)
+                                      : bound.value().floor());
+        try
+        {
+            return integer.toInt64();
+        }
+        catch (const std::exception&)
+        {
+            return std::nullopt;
+        }
+    };
+
+    std::optional<APOffset> lower = integerEndpoint(offset.lower(), true);
+    std::optional<APOffset> upper = integerEndpoint(offset.upper(), false);
+    if (lower && upper && *lower > *upper)
+        return AD::AddressSet::bottom();
+
+    // A finite narrow range must retain its signed offsets: negative GEPs are
+    // common in C++ vtable and subobject adjustment. SVFIR canonicalizes each
+    // signed offset modulo the base object's field limit. For an unbounded or
+    // wider range, enumerating one complete global field window covers every
+    // possible canonical field without an unbounded loop.
+    bool enumerateFieldUniverse = !lower || !upper;
+    if (!enumerateFieldUniverse)
+    {
+        enumerateFieldUniverse =
+            AD::Rational(*upper) - AD::Rational(*lower) >
+            AD::Rational(static_cast<s64_t>(Options::MaxFieldLimit()));
+    }
+    if (enumerateFieldUniverse)
+    {
+        lower = 0;
+        upper = static_cast<APOffset>(Options::MaxFieldLimit());
+    }
+
     AD::AddressSet result = AD::AddressSet::bottom();
-    for (APOffset index = lower; index <= upper; ++index)
+    for (APOffset index = *lower;; ++index)
     {
         for (AD::Location base : bases)
         {
@@ -218,6 +274,8 @@ AD::AddressSet AbstractInterpretation::getGepObjAddrs(
             if (gepVariable)
                 result.insert(locationOf(gepVariable));
         }
+        if (index == *upper)
+            break;
     }
     return result;
 }
@@ -461,15 +519,16 @@ void AbstractInterpretation::forgetValue(State& denseState,
 AD::Interval AbstractInterpretation::getInterval(const ValVar* var,
                                                       const ICFGNode* node)
 {
-    if (const auto* integer = SVFUtil::dyn_cast<ConstIntValVar>(var))
-        return AD::Interval::singleton(AD::Rational(integer->getSExtValue()));
+    AD::Interval constant;
+    if (constantInterval(var, constant))
+        return constant;
+    if (var->isPointer())
+        return AD::Interval::bottom();
     if (!adapter_.contains(*var))
         return AD::Interval::top();
 
     const State& denseState = ensureState(node);
     const AD::Variable variable = adapter_.variable(*var);
-    if (var->isPointer())
-        return AD::Interval::bottom();
     return denseState.numerical().bound(variable);
 }
 
@@ -494,10 +553,10 @@ AD::Interval AbstractInterpretation::getInterval(const SVFVar* var,
 AD::AddressSet AbstractInterpretation::getAddressSet(const ValVar* var,
                                                           const ICFGNode* node)
 {
-    if (!adapter_.contains(*var))
-        return AD::AddressSet::top();
     if (!var->isPointer())
         return AD::AddressSet::bottom();
+    if (!adapter_.contains(*var))
+        return AD::AddressSet::top();
     const State& denseState = ensureState(node);
     const AD::Variable variable = adapter_.variable(*var);
     return denseState.addresses().addressSet(variable);
@@ -524,7 +583,8 @@ AD::AddressSet AbstractInterpretation::getAddressSet(const SVFVar* var,
 bool AbstractInterpretation::hasAbsValue(const ValVar* var,
                                               const ICFGNode* node) const
 {
-    if (SVFUtil::isa<ConstIntValVar>(var))
+    if (SVFUtil::isa<ConstIntValVar>(var) ||
+        SVFUtil::isa<ConstFPValVar>(var))
         return true;
     return stateTrace_.count(node) != 0 && adapter_.contains(*var);
 }
@@ -763,11 +823,14 @@ void AbstractInterpretation::assumeBranch(const IntraCFGEdge* edge,
 
     auto operand = [&](const SVFVar* variable,
                        AD::LinearExpression& expression) -> bool {
-        if (const auto* integer = SVFUtil::dyn_cast<ConstIntValVar>(variable))
+        if (const auto* value = SVFUtil::dyn_cast<ValVar>(variable))
         {
-            expression =
-                AD::LinearExpression(AD::Rational(integer->getSExtValue()));
-            return true;
+            AD::Interval constant;
+            if (constantInterval(value, constant) && constant.isSingleton())
+            {
+                expression = AD::LinearExpression(constant.singletonValue());
+                return true;
+            }
         }
         const auto* value = SVFUtil::dyn_cast<ValVar>(variable);
         if (!value || !adapter_.contains(*value))

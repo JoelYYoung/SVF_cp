@@ -114,7 +114,14 @@ void testScalarTransferOperations()
                       Rational(-9), Rational(7)) &&
             hasBounds(bitwiseOr(Interval::closed(Rational(1), Rational(3)),
                                 Interval::closed(Rational(4), Rational(4))),
-                      Rational(0), Rational(7)),
+                      Rational(0), Rational(7)) &&
+            hasBounds(bitwiseAnd(Interval::top(),
+                                 Interval::closed(Rational(0), Rational(31))),
+                      Rational(0), Rational(31)) &&
+            hasBounds(bitwiseAnd(
+                          Interval::closed(Rational(-8), Rational(8)),
+                          Interval::closed(Rational(0), Rational(15))),
+                      Rational(0), Rational(15)),
         "native range bitwise or shift transfer was not sound");
 
     const Interval low = Interval::closed(Rational(0), Rational(3));

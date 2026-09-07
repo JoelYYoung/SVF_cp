@@ -36,8 +36,10 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace SVF;
@@ -257,6 +259,104 @@ struct ResultChecksum
     std::size_t records;
 };
 
+std::string keyPart(const std::string& value)
+{
+    return std::to_string(value.size()) + ':' + value;
+}
+
+std::string functionKey(const FunObjVar* function)
+{
+    return function ? keyPart(function->getName()) : "0:";
+}
+
+std::string floatingKey(double value)
+{
+    std::ostringstream stream;
+    stream << std::hexfloat << value;
+    return stream.str();
+}
+
+bool hasUpstreamComparableType(const SVFVar& value)
+{
+    return value.isPointer() ||
+           (value.getType() &&
+            value.getType()->getKind() == SVFType::SVFIntegerTy);
+}
+
+std::size_t basicBlockOrdinal(const SVFBasicBlock* block)
+{
+    if (!block)
+        return 0;
+    const FunObjVar* function = block->getFunction();
+    std::size_t ordinal = 0;
+    for (auto iterator = function->begin(); iterator != function->end();
+         ++iterator, ++ordinal)
+    {
+        if (iterator->second == block)
+            return ordinal;
+    }
+    return 0;
+}
+
+std::size_t instructionOrdinal(const ICFGNode* node)
+{
+    const SVFBasicBlock* block = node->getBB();
+    if (!block)
+        return 0;
+    const auto& nodes = block->getICFGNodeList();
+    const auto iterator = std::find(nodes.begin(), nodes.end(), node);
+    if (iterator == nodes.end())
+        return 0;
+    return static_cast<std::size_t>(std::distance(nodes.begin(), iterator));
+}
+
+/// Identify an ICFG point without using allocation-order-dependent NodeIDs.
+std::string programPointKey(const ICFGNode* node)
+{
+    if (!node)
+        return "no-site";
+    if (SVFUtil::isa<GlobalICFGNode>(node))
+        return "global";
+    std::string result = "fun=" + functionKey(node->getFun());
+    result += ";kind=" + std::to_string(node->getNodeKind());
+    if (SVFUtil::isa<FunEntryICFGNode>(node) ||
+        SVFUtil::isa<FunExitICFGNode>(node))
+        return result;
+    if (const auto* ret = SVFUtil::dyn_cast<RetICFGNode>(node))
+        return result + ";call=" +
+               keyPart(programPointKey(ret->getCallICFGNode()));
+    if (node->getBB())
+    {
+        result += ";bb=" + std::to_string(basicBlockOrdinal(node->getBB()));
+        result += ";inst=" + std::to_string(instructionOrdinal(node));
+    }
+    return result;
+}
+
+/// Identify a memory object by its program meaning rather than its ObjVar ID.
+std::string memoryObjectKey(const ObjVar* object)
+{
+    if (const auto* gep = SVFUtil::dyn_cast<GepObjVar>(object))
+    {
+        return "gep(" + memoryObjectKey(gep->getBaseObj()) + "," +
+               std::to_string(gep->getConstantFieldIdx()) + ')';
+    }
+    const auto* base = SVFUtil::dyn_cast<BaseObjVar>(object);
+    if (!base)
+        return "obj(kind=" + std::to_string(object->getNodeKind()) +
+               ";name=" + keyPart(object->getValueName()) + ')';
+    if (SVFUtil::isa<ConstNullPtrObjVar>(base))
+        return "null";
+    if (const auto* integer = SVFUtil::dyn_cast<ConstIntObjVar>(base))
+        return "const-int(s=" + std::to_string(integer->getSExtValue()) +
+               ";z=" + std::to_string(integer->getZExtValue()) + ')';
+    if (const auto* floating = SVFUtil::dyn_cast<ConstFPObjVar>(base))
+        return "const-fp(" + floatingKey(floating->getFPValue()) + ')';
+    return "base(kind=" + std::to_string(base->getNodeKind()) +
+           ";name=" + keyPart(base->getName()) +
+           ";site=" + keyPart(programPointKey(base->getICFGNode())) + ')';
+}
+
 std::string canonicalAddressSet(const AD::AddressSet& addresses,
                                 const AbstractInterpretation& analysis)
 {
@@ -264,28 +364,28 @@ std::string canonicalAddressSet(const AD::AddressSet& addresses,
         return "top";
     if (addresses.isBottom())
         return "bottom";
-    std::vector<NodeID> objectIds;
-    objectIds.reserve(addresses.size());
+    std::vector<std::string> objects;
+    objects.reserve(addresses.size());
     for (AD::Location location : addresses.locations())
     {
         if (location.isNull())
         {
-            objectIds.push_back(0U);
+            objects.push_back("null");
             continue;
         }
         const ObjVar* object = analysis.objectAt(location);
         if (!object)
             throw std::runtime_error(
                 "analysis address has no Location-to-ObjVar mapping");
-        objectIds.push_back(object->getId());
+        objects.push_back(memoryObjectKey(object));
     }
-    std::sort(objectIds.begin(), objectIds.end());
+    std::sort(objects.begin(), objects.end());
     std::string result = "{";
-    for (NodeID objectId : objectIds)
+    for (const std::string& object : objects)
     {
         if (result.size() != 1)
             result += ',';
-        result += std::to_string(objectId);
+        result += keyPart(object);
     }
     return result + '}';
 }
@@ -299,16 +399,56 @@ std::string canonicalInterval(const AD::Interval& interval)
     return interval.toString();
 }
 
-void addAnchorVariable(std::map<NodeID, const ValVar*>& variables,
+std::string valueVariableKey(const ValVar* value)
+{
+    if (const auto* argument = SVFUtil::dyn_cast<ArgValVar>(value))
+    {
+        return "arg(fun=" + functionKey(argument->getFunction()) +
+               ";index=" + std::to_string(argument->getArgNo()) + ')';
+    }
+    if (const auto* gep = SVFUtil::dyn_cast<GepValVar>(value))
+    {
+        return "gep(" + valueVariableKey(gep->getBaseNode()) + "," +
+               std::to_string(gep->getConstantFieldIdx()) + ')';
+    }
+    if (const auto* integer = SVFUtil::dyn_cast<ConstIntValVar>(value))
+        return "const-int(s=" + std::to_string(integer->getSExtValue()) +
+               ";z=" + std::to_string(integer->getZExtValue()) + ')';
+    if (const auto* floating = SVFUtil::dyn_cast<ConstFPValVar>(value))
+        return "const-fp(" + floatingKey(floating->getFPValue()) + ')';
+    if (SVFUtil::isa<ConstNullPtrValVar>(value))
+        return "null";
+    return "var(kind=" + std::to_string(value->getNodeKind()) +
+           ";name=" + keyPart(value->getValueName()) +
+           ";fun=" + functionKey(value->getFunction()) +
+           ";site=" + keyPart(programPointKey(value->getICFGNode())) + ')';
+}
+
+void addAnchorVariable(std::map<std::string, const ValVar*>& variables,
                        const SVFVar* value)
 {
     if (const auto* scalar = SVFUtil::dyn_cast<ValVar>(value))
-        variables.emplace(scalar->getId(), scalar);
+    {
+        // Constants are immutable program inputs, not facts computed by the
+        // analysis. Their domain-specific encoding is covered by dedicated
+        // transfer tests and must not make the state-result projection differ.
+        if (scalar->isConstDataOrAggDataButNotNullPtr() ||
+            SVFUtil::isa<ConstNullPtrValVar>(scalar) ||
+            SVFUtil::isa<DummyValVar>(scalar) ||
+            !hasUpstreamComparableType(*scalar))
+            return;
+        const std::string key = valueVariableKey(scalar);
+        const auto [iterator, inserted] = variables.emplace(key, scalar);
+        if (!inserted && iterator->second != scalar &&
+            !SVFUtil::isa<GepValVar>(iterator->second) &&
+            !SVFUtil::isa<GepValVar>(scalar))
+            throw std::runtime_error("non-unique semantic value key: " + key);
+    }
 }
 
-std::map<NodeID, const ValVar*> anchorVariables(const ICFGNode* node)
+std::map<std::string, const ValVar*> anchorVariables(const ICFGNode* node)
 {
-    std::map<NodeID, const ValVar*> variables;
+    std::map<std::string, const ValVar*> variables;
     for (const SVFStmt* statement : node->getSVFStmts())
     {
         if (const auto* assignment =
@@ -343,7 +483,7 @@ std::map<NodeID, const ValVar*> anchorVariables(const ICFGNode* node)
     return variables;
 }
 
-using MemoryQuery = std::pair<NodeID, bool>;
+using MemoryQuery = std::tuple<std::string, std::string, bool>;
 
 std::map<MemoryQuery, const ObjVar*> anchorMemoryObjects(
     const SVFIR& graph, AndersenWaveDiff& pointerAnalysis,
@@ -353,17 +493,25 @@ std::map<MemoryQuery, const ObjVar*> anchorMemoryObjects(
     for (const SVFStmt* statement : node->getSVFStmts())
     {
         const ValVar* pointer = nullptr;
+        const char* accessKind = nullptr;
         bool pointerContent = false;
+        bool comparableContent = false;
         if (const auto* load = SVFUtil::dyn_cast<LoadStmt>(statement))
         {
             pointer = load->getRHSVar();
+            accessKind = "load";
             pointerContent = load->getLHSVar()->isPointer();
+            comparableContent =
+                hasUpstreamComparableType(*load->getLHSVar());
         }
         else if (const auto* store =
                      SVFUtil::dyn_cast<StoreStmt>(statement))
         {
             pointer = store->getLHSVar();
+            accessKind = "store";
             pointerContent = store->getRHSVar()->isPointer();
+            comparableContent =
+                hasUpstreamComparableType(*store->getRHSVar());
         }
         if (!pointer)
             continue;
@@ -371,7 +519,16 @@ std::map<MemoryQuery, const ObjVar*> anchorMemoryObjects(
         {
             if (const auto* object =
                     SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(objectId)))
-                objects.emplace(MemoryQuery{objectId, pointerContent}, object);
+            {
+                if (!pointerContent && !comparableContent)
+                    continue;
+                objects.emplace(MemoryQuery{std::string(accessKind) +
+                                                ";pointer=" +
+                                                keyPart(valueVariableKey(pointer)),
+                                            memoryObjectKey(object),
+                                            pointerContent},
+                                object);
+            }
         }
     }
     return objects;
@@ -461,16 +618,20 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                               AndersenWaveDiff& pointerAnalysis)
 {
     std::vector<std::string> records;
-    auto numericalRecord = [&](const char* kind, NodeID point, NodeID id,
+    std::vector<std::string> pointOrder;
+    std::map<std::string, const ICFGNode*> pointOwners;
+    auto numericalRecord = [&](const char* kind, const std::string& point,
+                               const std::string& query,
                                const AD::Interval& value) {
-        records.push_back(std::string(kind) + '|' + std::to_string(point) +
-                          '|' + std::to_string(id) + "|N|" +
+        records.push_back(std::string(kind) + '|' + keyPart(point) + '|' +
+                          keyPart(query) + "|N|" +
                           canonicalInterval(value));
     };
-    auto addressRecord = [&](const char* kind, NodeID point, NodeID id,
+    auto addressRecord = [&](const char* kind, const std::string& point,
+                             const std::string& query,
                              const AD::AddressSet& value) {
-        records.push_back(std::string(kind) + '|' + std::to_string(point) +
-                          '|' + std::to_string(id) + "|A|" +
+        records.push_back(std::string(kind) + '|' + keyPart(point) + '|' +
+                          keyPart(query) + "|A|" +
                           canonicalAddressSet(value, analysis));
     };
 
@@ -484,15 +645,21 @@ ResultChecksum resultChecksum(const SVFIR& graph,
               });
     for (const ICFGNode* node : nodes)
     {
-        const NodeID point = node->getId();
+        const std::string point = programPointKey(node);
+        const auto [owner, inserted] = pointOwners.emplace(point, node);
+        if (!inserted && owner->second != node)
+            throw std::runtime_error("non-unique semantic point key: " +
+                                     point);
+        pointOrder.push_back(point);
         const bool reachable = analysis.hasAbsState(node);
-        records.push_back("R|" + std::to_string(point) + '|' +
+        records.push_back("R|" + keyPart(point) + '|' +
                           (reachable ? '1' : '0'));
         if (!reachable)
             continue;
 
-        for (const auto& [id, value] : anchorVariables(node))
+        for (const auto& [query, value] : anchorVariables(node))
         {
+            const NodeID id = value->getId();
             if (id == IRGraph::NullPtr || id == graph.getBlkPtr())
                 continue;
             if (value->isPointer())
@@ -501,7 +668,7 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                                                   ? analysis.getAddressSet(
                                                         value, node)
                                                   : AD::AddressSet::top();
-                addressRecord("V", point, id, answer);
+                addressRecord("V", point, query, answer);
             }
             else
             {
@@ -509,21 +676,23 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                                                 ? analysis.getInterval(value,
                                                                        node)
                                                 : AD::Interval::top();
-                numericalRecord("V", point, id, answer);
+                numericalRecord("V", point, query, answer);
             }
         }
 
         for (const auto& [query, object] :
              anchorMemoryObjects(graph, pointerAnalysis, node))
         {
-            const auto [id, pointerContent] = query;
+            const auto& [statement, objectKey, pointerContent] = query;
             if (pointerContent)
             {
                 const AD::AddressSet answer = analysis.hasAbsValue(object, node)
                                                   ? analysis.getAddressSet(
                                                         object, node)
                                                   : AD::AddressSet::top();
-                addressRecord("M", point, id, answer);
+                addressRecord("M", point,
+                              statement + ";object=" + keyPart(objectKey),
+                              answer);
             }
             else
             {
@@ -531,11 +700,13 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                                                 ? analysis.getInterval(object,
                                                                        node)
                                                 : AD::Interval::top();
-                numericalRecord("M", point, id, answer);
+                numericalRecord("M", point,
+                                statement + ";object=" + keyPart(objectKey),
+                                answer);
             }
             records.push_back(
-                "F|" + std::to_string(point) + '|' + std::to_string(id) +
-                '|' +
+                "F|" + keyPart(point) + '|' +
+                keyPart(statement + ";object=" + keyPart(objectKey)) + '|' +
                 (analysis.isFreedMemory(analysis.locationOf(object), node)
                      ? '1'
                      : '0'));
@@ -543,6 +714,12 @@ ResultChecksum resultChecksum(const SVFIR& graph,
     }
 
     std::sort(records.begin(), records.end());
+    if (std::getenv("SVF_AE_RESULT_POINTS"))
+    {
+        for (std::size_t index = 0; index < pointOrder.size(); ++index)
+            std::cout << "AE_RESULT_POINT " << index << '|'
+                      << keyPart(pointOrder[index]) << '\n';
+    }
     if (std::getenv("SVF_AE_RESULT_RECORDS"))
     {
         for (const std::string& record : records)
@@ -756,6 +933,229 @@ void validateConservativeUnknownCasts(const SVFIR& graph,
         throw std::runtime_error(
             "typed Top or inttoptr conservative fallback was not preserved");
 }
+
+void validateFloatingConstants(const SVFIR& graph,
+                               AbstractInterpretation& analysis)
+{
+    const SVFVar* candidate = findValue(graph, "floating_result");
+    const SVFVar* fractionalCandidate = findValue(graph, "fractional_result");
+    const SVFVar* comparisonCandidate = findValue(graph, "is_exact");
+    const SVFVar* memoryCandidate =
+        findValue(graph, "floating_memory_result");
+    const SVFVar* memoryComparisonCandidate =
+        findValue(graph, "memory_is_exact");
+    const auto* result = candidate ? SVFUtil::dyn_cast<ValVar>(candidate)
+                                   : nullptr;
+    const auto* fractional =
+        fractionalCandidate
+            ? SVFUtil::dyn_cast<ValVar>(fractionalCandidate)
+            : nullptr;
+    const auto* comparison =
+        comparisonCandidate
+            ? SVFUtil::dyn_cast<ValVar>(comparisonCandidate)
+            : nullptr;
+    const auto* memory =
+        memoryCandidate ? SVFUtil::dyn_cast<ValVar>(memoryCandidate) : nullptr;
+    const auto* memoryComparison =
+        memoryComparisonCandidate
+            ? SVFUtil::dyn_cast<ValVar>(memoryComparisonCandidate)
+            : nullptr;
+    if (!result && !fractional && !comparison && !memory && !memoryComparison)
+        return;
+    if (!result || !fractional || !comparison || !memory || !memoryComparison)
+        throw std::runtime_error("floating-constant fixture is incomplete");
+    const AD::Variable fractionalVariable =
+        SVFIRAdapter(graph).variable(*fractional);
+    const AD::NumericType& type = fractionalVariable.type();
+    if (type.kind != AD::NumericKind::IEEEFloat ||
+        type.floatFormat.exponentBits != 11 ||
+        type.floatFormat.significandBits != 53)
+        throw std::runtime_error(
+            "double ValVar was not mapped to IEEE binary64");
+    bool observedIntegral = false;
+    bool observedFractional = false;
+    bool observedComparison = false;
+    bool observedMemory = false;
+    bool observedMemoryComparison = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+    {
+        const AD::Interval value = analysis.getInterval(result, node);
+        observedIntegral |=
+            hasFiniteBounds(value, 2147483648LL, 2147483648LL);
+        const AD::Interval fraction = analysis.getInterval(fractional, node);
+        observedFractional |= fraction.isSingleton() &&
+                              fraction.singletonValue() ==
+                                  AD::Rational::fromDouble(0.5);
+        observedComparison |=
+            hasFiniteBounds(analysis.getInterval(comparison, node), 1, 1);
+        const AD::Interval memoryValue = analysis.getInterval(memory, node);
+        observedMemory |= memoryValue.isSingleton() &&
+                          memoryValue.singletonValue() ==
+                              AD::Rational::fromDouble(0.5);
+        observedMemoryComparison |= hasFiniteBounds(
+            analysis.getInterval(memoryComparison, node), 1, 1);
+    }
+    if (!observedIntegral || !observedFractional || !observedComparison ||
+        !observedMemory || !observedMemoryComparison)
+    {
+        const ICFGNode* point = comparison->getICFGNode();
+        throw std::runtime_error(
+            "floating constants or their exact comparison lost precision: "
+            "operand-at-cmp=" +
+            analysis.getInterval(result, point).toString() +
+            ", result-at-cmp=" +
+            analysis.getInterval(comparison, point).toString() +
+            ", flow-bottom=" +
+            (analysis.getAbstractState(point).isBottom() ? "true" : "false"));
+    }
+}
+
+void validatePointerArgumentFlow(const SVFIR& graph,
+                                 AbstractInterpretation& analysis)
+{
+    const SVFVar* pointerCandidate = findValue(graph, "pointer_argument");
+    const SVFVar* resultCandidate =
+        findValue(graph, "pointer_argument_result");
+    if (!pointerCandidate && !resultCandidate)
+        return;
+    const auto* pointer =
+        pointerCandidate ? SVFUtil::dyn_cast<ValVar>(pointerCandidate) : nullptr;
+    const auto* result =
+        resultCandidate ? SVFUtil::dyn_cast<ValVar>(resultCandidate) : nullptr;
+    if (!pointer || !result)
+        throw std::runtime_error("pointer-argument fixture is incomplete");
+
+    bool observedPointer = false;
+    bool observedResult = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+    {
+        const AD::AddressSet addresses = analysis.getAddressSet(pointer, node);
+        observedPointer |= addresses.isSingleton() &&
+                           !addresses.contains(AD::Location::null());
+        observedResult |=
+            hasFiniteBounds(analysis.getInterval(result, node), 11, 11);
+    }
+    if (!observedPointer || !observedResult)
+        throw std::runtime_error(
+            "direct-call pointer argument lost its singleton object or "
+            "memory value");
+}
+
+void validateMultiCallerPointerFlow(const SVFIR& graph,
+                                    AbstractInterpretation& analysis)
+{
+    const SVFVar* pointerCandidate =
+        findValue(graph, "multi_pointer_argument");
+    const SVFVar* resultCandidate =
+        findValue(graph, "multi_pointer_argument_result");
+    if (!pointerCandidate && !resultCandidate)
+        return;
+    const auto* pointer =
+        pointerCandidate ? SVFUtil::dyn_cast<ValVar>(pointerCandidate) : nullptr;
+    const auto* result =
+        resultCandidate ? SVFUtil::dyn_cast<ValVar>(resultCandidate) : nullptr;
+    if (!pointer || !result)
+        throw std::runtime_error("multi-caller pointer fixture is incomplete");
+
+    bool observedJoinedPointer = false;
+    bool observedJoinedResult = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+    {
+        const AD::AddressSet addresses = analysis.getAddressSet(pointer, node);
+        observedJoinedPointer |= !addresses.isTop() && addresses.size() == 2;
+        observedJoinedResult |=
+            hasFiniteBounds(analysis.getInterval(result, node), 7, 11);
+    }
+    if (!observedJoinedPointer || !observedJoinedResult)
+        throw std::runtime_error(
+            "multi-caller pointer argument did not join both call sites");
+}
+
+void validateUnknownCallerPointerFlow(const SVFIR& graph,
+                                      AbstractInterpretation& analysis)
+{
+    const SVFVar* pointerCandidate =
+        findValue(graph, "unknown_pointer_argument");
+    const SVFVar* resultCandidate =
+        findValue(graph, "unknown_pointer_argument_result");
+    if (!pointerCandidate && !resultCandidate)
+        return;
+    const auto* pointer =
+        pointerCandidate ? SVFUtil::dyn_cast<ValVar>(pointerCandidate) : nullptr;
+    const auto* result =
+        resultCandidate ? SVFUtil::dyn_cast<ValVar>(resultCandidate) : nullptr;
+    if (!pointer || !result)
+        throw std::runtime_error("unknown-caller pointer fixture is incomplete");
+
+    bool observedUnknownPointer = false;
+    bool observedUnknownResult = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+    {
+        observedUnknownPointer |=
+            analysis.getAddressSet(pointer, node).isTop();
+        observedUnknownResult |= analysis.getInterval(result, node).isTop();
+    }
+    if (!observedUnknownPointer || !observedUnknownResult)
+        throw std::runtime_error(
+            "known and unknown callers did not conservatively join to Top");
+}
+
+void validatePointerOrderingFlow(const SVFIR& graph,
+                                 AbstractInterpretation& analysis)
+{
+    const SVFVar* orderingCandidate =
+        findValue(graph, "pointer_ordering_result");
+    const SVFVar* sameCandidate =
+        findValue(graph, "same_pointer_ordering_result");
+    const SVFVar* zextCandidate = findValue(graph, "result");
+    if (!orderingCandidate && !sameCandidate)
+        return;
+    const auto* ordering = orderingCandidate
+                               ? SVFUtil::dyn_cast<ValVar>(orderingCandidate)
+                               : nullptr;
+    const auto* same =
+        sameCandidate ? SVFUtil::dyn_cast<ValVar>(sameCandidate) : nullptr;
+    const auto* zext =
+        zextCandidate ? SVFUtil::dyn_cast<ValVar>(zextCandidate) : nullptr;
+    if (!ordering || !same || !zext)
+        throw std::runtime_error("pointer-ordering fixture is incomplete");
+
+    bool observedUnknownOrdering = false;
+    bool observedKnownSameOrdering = false;
+    bool observedZExtRange = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+    {
+        observedUnknownOrdering |=
+            hasFiniteBounds(analysis.getInterval(ordering, node), 0, 1);
+        observedKnownSameOrdering |=
+            hasFiniteBounds(analysis.getInterval(same, node), 1, 1);
+        observedZExtRange |=
+            hasFiniteBounds(analysis.getInterval(zext, node), 0, 1);
+    }
+    if (!observedUnknownOrdering || !observedKnownSameOrdering ||
+        !observedZExtRange)
+        throw std::runtime_error(
+            "pointer ordering used abstract Location IDs as concrete order");
+}
+
+void validateNegativeGepFlow(const SVFIR& graph,
+                             AbstractInterpretation& analysis)
+{
+    const SVFVar* candidate = findValue(graph, "negative_gep_result");
+    if (!candidate)
+        return;
+    const auto* result = SVFUtil::dyn_cast<ValVar>(candidate);
+    if (!result)
+        throw std::runtime_error("negative-GEP fixture is incomplete");
+
+    bool observedExpectedValue = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+        observedExpectedValue |=
+            hasFiniteBounds(analysis.getInterval(result, node), 30, 30);
+    if (!observedExpectedValue)
+        throw std::runtime_error(
+            "signed negative GEP offset was clamped or mis-normalized");
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -772,7 +1172,6 @@ int main(int argc, char** argv)
         AndersenWaveDiff* ander =
             AndersenWaveDiff::createAndersenWaveDiff(graph);
         builder.updateCallGraph(ander->getCallGraph());
-
         AbstractInterpretation& analysis =
             AbstractInterpretation::getAEInstance();
         analysis.runOnModule();
@@ -786,6 +1185,12 @@ int main(int argc, char** argv)
         validateProjection(*graph, analysis);
         validateSparseMemoryRefinement(*graph, analysis);
         validateConservativeUnknownCasts(*graph, analysis);
+        validateFloatingConstants(*graph, analysis);
+        validatePointerArgumentFlow(*graph, analysis);
+        validateMultiCallerPointerFlow(*graph, analysis);
+        validateUnknownCallerPointerFlow(*graph, analysis);
+        validatePointerOrderingFlow(*graph, analysis);
+        validateNegativeGepFlow(*graph, analysis);
 
         std::cout << "AE_GENERIC_OBSERVATION analyzed_nodes="
                   << analysis.getAnalyzedNodes().size() << '\n';
@@ -796,7 +1201,7 @@ int main(int argc, char** argv)
             std::cout << "AE_RESULT_HASH fnv1a64=" << std::hex << std::setw(16)
                       << std::setfill('0') << result.value << std::dec
                       << " records=" << result.records
-                      << " contract=svf-query-projection-v4\n";
+                      << " contract=svf-query-projection-v7\n";
             std::cout << "AE_SEMANTIC_CHECKSUM fnv1a64=" << std::hex
                       << std::setw(16) << std::setfill('0')
                       << semanticChecksum(analysis) << std::dec << '\n';

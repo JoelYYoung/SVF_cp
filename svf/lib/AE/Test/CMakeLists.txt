@@ -70,10 +70,40 @@ if(TARGET SvfLLVM)
       box-ae-conservative-unknown-casts-${sparsity}
       ConservativeUnknownCasts.ll ${sparsity}
     )
+    add_box_ae_test(
+      box-ae-floating-constant-${sparsity}
+      FloatingConstantFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
+      box-ae-pointer-argument-${sparsity}
+      PointerArgumentFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
+      box-ae-multi-caller-pointer-${sparsity}
+      MultiCallerPointerFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
+      box-ae-unknown-caller-pointer-${sparsity}
+      UnknownCallerPointerFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
+      box-ae-pointer-ordering-${sparsity}
+      PointerOrderingFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
+      box-ae-negative-gep-${sparsity}
+      NegativeGepFlow.ll ${sparsity}
+    )
   endforeach()
   add_box_ae_test(
     box-ae-global-scalar-carrier GlobalScalarCarrier.ll dense
   )
+  foreach(sparsity IN ITEMS dense semi-sparse sparse)
+    add_box_ae_test(
+      box-ae-opaque-gep-object-${sparsity}
+      OpaqueGepObject.ll ${sparsity}
+    )
+  endforeach()
   foreach(sparsity IN ITEMS dense semi-sparse sparse)
     add_box_ae_test(
       box-ae-global-gep-initializer-${sparsity}
@@ -85,7 +115,7 @@ if(TARGET SvfLLVM)
         ENVIRONMENT
           "SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS=1;SVF_AE_SEMANTIC_CHECKSUM=1"
         PASS_REGULAR_EXPRESSION
-          "AE_RESULT_HASH fnv1a64=2b0eeb6b890ec8d6 records=74 contract=svf-query-projection-v4"
+          "AE_RESULT_HASH fnv1a64=3002b6c833fd07fd records=62 contract=svf-query-projection-v7"
     )
   endforeach()
   add_box_ae_test(
@@ -104,7 +134,7 @@ if(TARGET SvfLLVM)
       ENVIRONMENT
         "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1;SVF_AE_SEMANTIC_CHECKSUM=1"
       PASS_REGULAR_EXPRESSION
-        "AE_RESULT_HASH fnv1a64=[0-9a-f]+ records=[0-9]+ contract=svf-query-projection-v4"
+        "AE_RESULT_HASH fnv1a64=b0c9d6b1f8615842 records=43 contract=svf-query-projection-v7"
   )
 endif()
 

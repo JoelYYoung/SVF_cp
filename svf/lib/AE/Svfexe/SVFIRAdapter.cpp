@@ -26,10 +26,12 @@
 #include "SVFIR/SVFIR.h"
 #include "SVFIR/SVFType.h"
 #include "SVFIR/SVFVariables.h"
+#include "Util/Options.h"
 #include "Util/SVFUtil.h"
 
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace SVF
@@ -42,11 +44,72 @@ using AbstractDomain::Variable;
 namespace
 {
 
-Variable nextVariable(std::uint64_t& next)
+AbstractDomain::NumericType numericType(const SVFType* type, bool pointer)
+{
+    if (pointer)
+        return AbstractDomain::NumericType::integer();
+
+    if (!type || type->getKind() == SVFType::SVFIntegerTy)
+        return AbstractDomain::NumericType::integer();
+    if (type->getKind() != SVFType::SVFOtherTy)
+        return AbstractDomain::NumericType::real();
+
+    const std::string representation = type->toString();
+    using AbstractDomain::FloatFormat;
+    if (representation == "half")
+        return AbstractDomain::NumericType::ieee(FloatFormat{5, 11});
+    if (representation == "bfloat")
+        return AbstractDomain::NumericType::ieee(FloatFormat{8, 8});
+    if (representation == "float")
+        return AbstractDomain::NumericType::ieee(FloatFormat::binary32());
+    if (representation == "double")
+        return AbstractDomain::NumericType::ieee(FloatFormat::binary64());
+    if (representation == "x86_fp80")
+        return AbstractDomain::NumericType::ieee(FloatFormat{15, 64});
+    if (representation == "fp128")
+        return AbstractDomain::NumericType::ieee(FloatFormat{15, 113});
+    // Other scalar types have no integer semantics known to this adapter.
+    // Real is conservative and, unlike Integer, cannot tighten a fractional
+    // value to the empty set.
+    return AbstractDomain::NumericType::real();
+}
+
+AbstractDomain::NumericType numericType(const SVFVar& variable)
+{
+    return numericType(variable.getType(), variable.isPointer());
+}
+
+AbstractDomain::NumericType contentNumericType(const ObjVar& object)
+{
+    const auto* gep = SVFUtil::dyn_cast<GepObjVar>(&object);
+    if (!gep)
+        return numericType(object);
+
+    // GepObjVar::getType() asserts for overflow/summary fields and opaque
+    // aggregates. Inspect the flattened layout with an explicit bounds check
+    // so ordinary fields keep their precise type while such implementation
+    // objects conservatively use Real.
+    const SVFType* baseType = gep->getBaseObj()->getType();
+    if (!baseType)
+        return AbstractDomain::NumericType::real();
+    const StInfo* typeInfo = baseType->getTypeInfo();
+    const auto& elementTypes =
+        Options::ModelArrays() ? typeInfo->getFlattenElementTypes()
+                               : typeInfo->getFlattenFieldTypes();
+    const auto offset = static_cast<std::size_t>(gep->getConstantFieldIdx());
+    if (offset >= elementTypes.size())
+        return AbstractDomain::NumericType::real();
+    const SVFType* elementType = elementTypes[offset];
+    return numericType(elementType,
+                       elementType && elementType->isPointerTy());
+}
+
+Variable nextVariable(std::uint64_t& next,
+                      AbstractDomain::NumericType type)
 {
     if (next > std::numeric_limits<std::uint32_t>::max())
         throw std::overflow_error("too many abstract-domain variables");
-    return Variable(static_cast<std::uint32_t>(next++));
+    return Variable(static_cast<std::uint32_t>(next++), type);
 }
 
 Location nextLocation(std::uint64_t& next)
@@ -73,7 +136,8 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
             // must retain their computed AddressSet.
             if (!pointers && value->isConstDataOrAggDataButNotNullPtr())
                 continue;
-            const Variable variable = nextVariable(nextVariableId_);
+            const Variable variable =
+                nextVariable(nextVariableId_, numericType(*value));
             variables_.emplace(value, variable);
             valuesByVariableId_.resize(variable.id() + 1);
             valuesByVariableId_[variable.id()] = value;
@@ -118,7 +182,8 @@ void SVFIRAdapter::registerObject(const ObjVar& object) const
         return;
 
     const Location location = nextLocation(nextLocationId_);
-    const Variable content = nextVariable(nextVariableId_);
+    const Variable content =
+        nextVariable(nextVariableId_, contentNumericType(object));
     locations_.emplace(&object, location);
     objects_.emplace(location, &object);
     contentVariables_.emplace(&object, content);

@@ -223,13 +223,18 @@ AD::Interval SemiSparseAbstractInterpretation::getInterval(
 {
     if (const auto* integer = SVFUtil::dyn_cast<ConstIntValVar>(value))
         return AD::Interval::singleton(AD::Rational(integer->getSExtValue()));
-    if (!value || !this->adapter_.contains(*value))
+    if (const auto* floating = SVFUtil::dyn_cast<ConstFPValVar>(value))
+        return AD::Interval::singleton(
+            AD::Rational::fromDouble(floating->getFPValue()));
+    if (!value)
+        return AD::Interval::top();
+    if (value->isPointer())
+        return AD::Interval::bottom();
+    if (!this->adapter_.contains(*value))
         return AD::Interval::top();
 
     const State& scalars = scalarState();
     const AD::Variable variable = this->adapter_.variable(*value);
-    if (value->isPointer())
-        return AD::Interval::bottom();
     AD::Interval result = scalars.numerical().bound(variable);
     // Conditional-edge refinement is intentionally local to the ICFG state.
     // Read it in addition to the definition-site scalar carrier so transfer
@@ -254,10 +259,12 @@ AD::AddressSet SemiSparseAbstractInterpretation::getAddressSet(
     const ValVar* value, const ICFGNode* node)
 {
     (void)node;
-    if (!value || !this->adapter_.contains(*value))
+    if (!value)
         return AD::AddressSet::top();
     if (!value->isPointer())
         return AD::AddressSet::bottom();
+    if (!this->adapter_.contains(*value))
+        return AD::AddressSet::top();
     const State& scalars = scalarState();
     const AD::Variable variable = this->adapter_.variable(*value);
     return scalars.addresses().addressSet(variable);
@@ -267,7 +274,8 @@ bool SemiSparseAbstractInterpretation::hasAbsValue(
     const ValVar* value, const ICFGNode* node) const
 {
     (void)node;
-    if (SVFUtil::isa<ConstIntValVar>(value))
+    if (SVFUtil::isa<ConstIntValVar>(value) ||
+        SVFUtil::isa<ConstFPValVar>(value))
         return true;
     if (!value || !this->adapter_.contains(*value))
         return false;

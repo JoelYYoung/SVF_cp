@@ -1762,13 +1762,27 @@ Interval bitwiseAnd(const Interval& lhs, const Interval& rhs)
         });
     if (!exact.isTop())
         return exact;
-    const std::optional<mpz_class> lhsLower = finiteInteger(lhs.lower());
-    const std::optional<mpz_class> lhsUpper = finiteInteger(lhs.upper());
-    const std::optional<mpz_class> rhsLower = finiteInteger(rhs.lower());
-    const std::optional<mpz_class> rhsUpper = finiteInteger(rhs.upper());
-    if (lhsLower && lhsUpper && rhsLower && rhsUpper && *lhsLower >= 0 &&
-        *rhsLower >= 0)
+    const auto nonnegativeUpper = [](const Interval& interval)
+        -> std::optional<mpz_class> {
+        const std::optional<mpz_class> lower =
+            finiteInteger(interval.lower());
+        const std::optional<mpz_class> upper =
+            finiteInteger(interval.upper());
+        if (!lower || !upper || *lower < 0)
+            return std::nullopt;
+        return upper;
+    };
+    const std::optional<mpz_class> lhsUpper = nonnegativeUpper(lhs);
+    const std::optional<mpz_class> rhsUpper = nonnegativeUpper(rhs);
+    // For every nonnegative integer y, x & y is in [0, y], including when x
+    // is negative. Either bounded nonnegative operand therefore supplies a
+    // sound upper bound; if both do, use the tighter one.
+    if (lhsUpper && rhsUpper)
         return closedIntegers(0, std::min(*lhsUpper, *rhsUpper));
+    if (lhsUpper)
+        return closedIntegers(0, *lhsUpper);
+    if (rhsUpper)
+        return closedIntegers(0, *rhsUpper);
     return Interval::top();
 }
 

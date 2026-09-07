@@ -1139,33 +1139,29 @@ void AbstractInterpretation::updateStateOnCmp(const CmpStmt* cmp)
         case CmpStmt::ICMP_SGT:
         case CmpStmt::FCMP_OGT:
         case CmpStmt::FCMP_UGT:
-            if (exact)
-                result = boolean(lhsAddresses.begin()->id() >
-                                 rhsAddresses.begin()->id());
+            if (exact && *lhsAddresses.begin() == *rhsAddresses.begin())
+                result = boolean(false);
             break;
         case CmpStmt::ICMP_UGE:
         case CmpStmt::ICMP_SGE:
         case CmpStmt::FCMP_OGE:
         case CmpStmt::FCMP_UGE:
-            if (exact)
-                result = boolean(lhsAddresses.begin()->id() >=
-                                 rhsAddresses.begin()->id());
+            if (exact && *lhsAddresses.begin() == *rhsAddresses.begin())
+                result = boolean(true);
             break;
         case CmpStmt::ICMP_ULT:
         case CmpStmt::ICMP_SLT:
         case CmpStmt::FCMP_OLT:
         case CmpStmt::FCMP_ULT:
-            if (exact)
-                result = boolean(lhsAddresses.begin()->id() <
-                                 rhsAddresses.begin()->id());
+            if (exact && *lhsAddresses.begin() == *rhsAddresses.begin())
+                result = boolean(false);
             break;
         case CmpStmt::ICMP_ULE:
         case CmpStmt::ICMP_SLE:
         case CmpStmt::FCMP_OLE:
         case CmpStmt::FCMP_ULE:
-            if (exact)
-                result = boolean(lhsAddresses.begin()->id() <=
-                                 rhsAddresses.begin()->id());
+            if (exact && *lhsAddresses.begin() == *rhsAddresses.begin())
+                result = boolean(true);
             break;
         default:
             assert(false && "undefined pointer compare");
@@ -1248,45 +1244,50 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
         const SVFType* type = var->getType();
         if (SVFUtil::isa<SVFIntegerType>(type))
         {
-            u32_t bits = type->getByteSize() * 8;
             const AD::Interval value = getInterval(var, node);
-            if (value.isSingleton())
-            {
-                const s64_t numeral = value.singletonValue().toInt64();
-                if (bits == 8)
-                {
-                    int8_t signed_i8_value = numeral;
-                    u32_t unsigned_value =
-                        static_cast<uint8_t>(signed_i8_value);
-                    return AD::Interval::singleton(
-                        AD::Rational(unsigned_value));
-                }
-                else if (bits == 16)
-                {
-                    s16_t signed_i16_value = numeral;
-                    u32_t unsigned_value = static_cast<u16_t>(signed_i16_value);
-                    return AD::Interval::singleton(
-                        AD::Rational(unsigned_value));
-                }
-                else if (bits == 32)
-                {
-                    s32_t signed_i32_value = numeral;
-                    u32_t unsigned_value = static_cast<u32_t>(signed_i32_value);
-                    return AD::Interval::singleton(
-                        AD::Rational(unsigned_value));
-                }
-                else if (bits == 64)
-                {
-                    return AD::Interval::singleton(AD::Rational(numeral));
-                }
-                else
-                    assert(false &&
-                           "cannot support int type other than u8/16/32/64");
-            }
-            else
-            {
-                return AD::Interval::top();
-            }
+            if (value.isBottom())
+                return value;
+
+            const u32_t bits = type->getByteSize() * 8;
+            mpz_class modulus = 1;
+            mpz_mul_2exp(modulus.get_mpz_t(), modulus.get_mpz_t(), bits);
+            const AD::Rational zero(0);
+            const AD::Rational maximum =
+                AD::Rational::fromRaw(mpq_class(modulus - 1));
+            auto fullRange = [&]() {
+                return AD::Interval::closed(zero, maximum);
+            };
+            if (!value.lower().isFinite() || !value.upper().isFinite() ||
+                value.lower().isStrict() || value.upper().isStrict() ||
+                !value.lower().value().isInteger() ||
+                !value.upper().value().isInteger())
+                return fullRange();
+
+            const mpz_class lower =
+                value.lower().value().value().get_num();
+            const mpz_class upper =
+                value.upper().value().value().get_num();
+            if (upper - lower >= modulus)
+                return fullRange();
+
+            mpz_class lowerQuotient;
+            mpz_class upperQuotient;
+            mpz_fdiv_q(lowerQuotient.get_mpz_t(), lower.get_mpz_t(),
+                       modulus.get_mpz_t());
+            mpz_fdiv_q(upperQuotient.get_mpz_t(), upper.get_mpz_t(),
+                       modulus.get_mpz_t());
+            if (lowerQuotient != upperQuotient)
+                return fullRange();
+
+            mpz_class lowerResidue;
+            mpz_class upperResidue;
+            mpz_fdiv_r(lowerResidue.get_mpz_t(), lower.get_mpz_t(),
+                       modulus.get_mpz_t());
+            mpz_fdiv_r(upperResidue.get_mpz_t(), upper.get_mpz_t(),
+                       modulus.get_mpz_t());
+            return AD::Interval::closed(
+                AD::Rational::fromRaw(mpq_class(lowerResidue)),
+                AD::Rational::fromRaw(mpq_class(upperResidue)));
         }
         return AD::Interval::top();
     };
