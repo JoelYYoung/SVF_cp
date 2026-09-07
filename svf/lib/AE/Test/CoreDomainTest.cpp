@@ -268,8 +268,11 @@ void testProgramStateMemoryFacet()
     const Variable source(2);
     const Variable target(3);
     const Variable cell(4);
+    const Variable lateCell(5);
     const Location object(10);
-    BoxProgramState state(BoxDomain::top(), MemoryLayout({{object, cell}}));
+    const Location lateObject(20);
+    MemoryLayout layout({{object, cell}});
+    BoxProgramState state(BoxDomain::top(), layout);
     require(state.isTop(),
             "empty typed Box program state was not unconstrained");
     BoxProgramState unreachable(BoxDomain::bottom(),
@@ -287,8 +290,22 @@ void testProgramStateMemoryFacet()
     require(
         hasBounds(state.numerical().bound(target), Rational(7), Rational(7)),
         "Box program state did not preserve a strong store/load");
+
+    layout.extend(lateObject, lateCell);
+    require(state.memoryLayout().contains(lateObject) &&
+                state.memoryLayout().contentOf(lateObject) == lateCell,
+            "an existing state did not observe a monotone layout extension");
+    state.allocate(lateObject);
+    state.assignPointer(pointer, AddressSet::singleton(lateObject));
+    state.assignNumeric(source, LinearExpression(Rational(11)));
+    state.store(pointer, source);
+    state.load(target, pointer);
+    require(hasBounds(state.numerical().bound(target), Rational(11),
+                      Rational(11)),
+            "a dynamically registered memory cell was not usable");
+
     state.release(pointer);
-    require(state.lifetimes().mustBeFreed(object),
+    require(state.lifetimes().mustBeFreed(lateObject),
             "Box program state did not preserve released-memory status");
 
     BoxProgramState other = state;

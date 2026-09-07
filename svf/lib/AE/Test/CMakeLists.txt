@@ -74,6 +74,13 @@ if(TARGET SvfLLVM)
   add_box_ae_test(
     box-ae-wide-integer WideIntegerTruncation.ll dense
   )
+  add_box_ae_test(
+    box-ae-dynamic-object-schema BoxReducedProduct.ll dense
+  )
+  set_tests_properties(
+    box-ae-dynamic-object-schema
+    PROPERTIES ENVIRONMENT "SVF_AE_VALIDATE_DYNAMIC_ADAPTER=1"
+  )
   set_tests_properties(
     box-ae-projection-semi-sparse
     PROPERTIES

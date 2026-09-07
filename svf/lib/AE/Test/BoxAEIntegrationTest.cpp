@@ -338,6 +338,38 @@ std::map<NodeID, const ObjVar*> anchorMemoryObjects(
     return objects;
 }
 
+void validateDynamicObjectRegistration(SVFIR& graph)
+{
+    SVFIRAdapter adapter(graph);
+    const AD::MemoryLayout layoutSnapshot = adapter.memoryLayout();
+    const ObjVar* seed = nullptr;
+    for (auto iterator = graph.begin(); iterator != graph.end(); ++iterator)
+    {
+        if ((seed = SVFUtil::dyn_cast<ObjVar>(iterator->second)))
+            break;
+    }
+    if (!seed)
+        throw std::runtime_error("dynamic ObjVar fixture has no seed object");
+
+    const NodeID id = graph.addDummyObjNode(seed->getType());
+    const auto* object = SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(id));
+    if (!object || adapter.contains(*object))
+        throw std::runtime_error("dynamic ObjVar fixture was not new");
+
+    const AD::Location location = adapter.location(*object);
+    const AD::Variable content = adapter.contentVariable(*object);
+    const ObjVar* reverseContent = adapter.contentObject(content);
+    if (location.isNull() || !layoutSnapshot.contains(location) ||
+        layoutSnapshot.contentOf(location) != content ||
+        adapter.object(location).getId() != object->getId() ||
+        !reverseContent || reverseContent->getId() != object->getId())
+    {
+        throw std::runtime_error(
+            "dynamic ObjVar registration did not extend the shared memory "
+            "schema");
+    }
+}
+
 /// Hash representation-independent answers at stable semantic query anchors.
 /// Anchors come only from the common SVFIR and Andersen points-to solution;
 /// neither a Box page nor an upstream trace entry can create a record.
@@ -650,6 +682,8 @@ int main(int argc, char** argv)
         LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(modules);
         SVFIRBuilder builder;
         SVFIR* graph = builder.build();
+        if (std::getenv("SVF_AE_VALIDATE_DYNAMIC_ADAPTER"))
+            validateDynamicObjectRegistration(*graph);
         AndersenWaveDiff* ander =
             AndersenWaveDiff::createAndersenWaveDiff(graph);
         builder.updateCallGraph(ander->getCallGraph());

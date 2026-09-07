@@ -5,6 +5,7 @@
 
 #include "AE/Core/BoxProgramState.h"
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -40,13 +41,18 @@ public:
     }
 
 private:
+    void registerObject(const ObjVar& object) const;
+
     std::map<const ValVar*, AbstractDomain::Variable> variables_;
     std::vector<const ValVar*> valuesByVariableId_;
-    std::map<const ObjVar*, AbstractDomain::Location> locations_;
-    std::map<AbstractDomain::Location, const ObjVar*> objects_;
-    std::map<const ObjVar*, AbstractDomain::Variable> contentVariables_;
-    std::vector<const ObjVar*> contentObjectsByVariableId_;
-    AbstractDomain::MemoryLayout memoryLayout_;
+    mutable std::map<const ObjVar*, AbstractDomain::Location> locations_;
+    mutable std::map<AbstractDomain::Location, const ObjVar*> objects_;
+    mutable std::map<const ObjVar*, AbstractDomain::Variable>
+        contentVariables_;
+    mutable std::vector<const ObjVar*> contentObjectsByVariableId_;
+    mutable AbstractDomain::MemoryLayout memoryLayout_;
+    mutable std::uint64_t nextVariableId_ = 1;
+    mutable std::uint64_t nextLocationId_ = 1;
 };
 
 } // namespace SVF

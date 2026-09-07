@@ -39,9 +39,6 @@ Location nextLocation(std::uint64_t& next)
 
 SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
 {
-    std::uint64_t nextVariableId = 1;
-    std::map<Location, Variable> cells;
-
     auto addScalars = [&](bool pointers) {
         for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
         {
@@ -54,14 +51,13 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
             if (!pointers && !SVFUtil::isa<SVFIntegerType>(value->getType()))
                 continue;
 
-            const Variable variable = nextVariable(nextVariableId);
+            const Variable variable = nextVariable(nextVariableId_);
             variables_.emplace(value, variable);
             valuesByVariableId_.resize(variable.id() + 1);
             valuesByVariableId_[variable.id()] = value;
         }
     };
 
-    std::uint64_t nextLocationId = 1;
     auto addObjectContents = [&](bool pointers) {
         for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
         {
@@ -70,14 +66,7 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
             if (!object || object->isPointer() != pointers)
                 continue;
 
-            const Location location = nextLocation(nextLocationId);
-            const Variable content = nextVariable(nextVariableId);
-            locations_.emplace(object, location);
-            objects_.emplace(location, object);
-            contentVariables_.emplace(object, content);
-            contentObjectsByVariableId_.resize(content.id() + 1);
-            contentObjectsByVariableId_[content.id()] = object;
-            cells.emplace(location, content);
+            registerObject(*object);
         }
     };
 
@@ -95,8 +84,21 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
     addScalars(true);
     addObjectContents(false);
     addObjectContents(true);
+}
 
-    memoryLayout_ = MemoryLayout(std::move(cells));
+void SVFIRAdapter::registerObject(const ObjVar& object) const
+{
+    if (locations_.count(&object) != 0)
+        return;
+
+    const Location location = nextLocation(nextLocationId_);
+    const Variable content = nextVariable(nextVariableId_);
+    locations_.emplace(&object, location);
+    objects_.emplace(location, &object);
+    contentVariables_.emplace(&object, content);
+    contentObjectsByVariableId_.resize(content.id() + 1);
+    contentObjectsByVariableId_[content.id()] = &object;
+    memoryLayout_.extend(location, content);
 }
 
 bool SVFIRAdapter::contains(const ValVar& value) const
@@ -126,17 +128,15 @@ const ValVar* SVFIRAdapter::value(Variable variable) const
 
 Location SVFIRAdapter::location(const ObjVar& object) const
 {
+    registerObject(object);
     const auto iterator = locations_.find(&object);
-    if (iterator == locations_.end())
-        throw std::invalid_argument("ObjVar is not tracked by this adapter");
     return iterator->second;
 }
 
 Variable SVFIRAdapter::contentVariable(const ObjVar& object) const
 {
+    registerObject(object);
     const auto iterator = contentVariables_.find(&object);
-    if (iterator == contentVariables_.end())
-        throw std::invalid_argument("ObjVar is not tracked by this adapter");
     return iterator->second;
 }
 

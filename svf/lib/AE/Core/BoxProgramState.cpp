@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <stdexcept>
 
 namespace SVF::AbstractDomain
 {
@@ -238,6 +239,14 @@ Variable MemoryLayout::contentOf(Location location) const
     if (it == cells_->end())
         throw std::out_of_range("location has no content symbol");
     return it->second;
+}
+
+void MemoryLayout::extend(Location location, Variable content)
+{
+    const auto [iterator, inserted] = cells_->emplace(location, content);
+    if (!inserted && iterator->second != content)
+        throw std::invalid_argument(
+            "location already has a different content symbol");
 }
 
 } // namespace SVF::AbstractDomain

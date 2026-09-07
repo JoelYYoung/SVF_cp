@@ -74,14 +74,17 @@ private:
     std::shared_ptr<Values> values_;
 };
 
-/// Immutable mapping from abstract locations to the scalar symbol denoting the
-/// location's stored content. It is layout metadata, not mutable memory state.
+/// Monotone analysis-wide schema mapping abstract locations to the scalar
+/// symbols denoting their stored contents. Copies share the schema so objects
+/// discovered lazily by the frontend become visible to existing states. Such
+/// an extension does not mutate abstract values: every new coordinate has the
+/// domains' implicit Top value until a transfer assigns it.
 class MemoryLayout
 {
 public:
-    MemoryLayout() : cells_(std::make_shared<const Cells>()) {}
+    MemoryLayout() : cells_(std::make_shared<Cells>()) {}
     explicit MemoryLayout(std::map<Location, Variable> cells)
-        : cells_(std::make_shared<const Cells>(std::move(cells)))
+        : cells_(std::make_shared<Cells>(std::move(cells)))
     {
     }
 
@@ -89,6 +92,7 @@ public:
     {
         return cells_->count(location) != 0;
     }
+    void extend(Location location, Variable content);
     Variable contentOf(Location location) const;
     const std::map<Location, Variable>& cells() const
     {
@@ -102,7 +106,7 @@ public:
 
 private:
     using Cells = std::map<Location, Variable>;
-    std::shared_ptr<const Cells> cells_;
+    std::shared_ptr<Cells> cells_;
 };
 
 /// Complete Box-backed program state. Memory contents are ordinary symbols in
