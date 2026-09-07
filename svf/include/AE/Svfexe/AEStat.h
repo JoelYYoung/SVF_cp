@@ -44,8 +44,8 @@ public:
     {
         u32_t vmrss, vmsize;
         return SVFUtil::getMemoryUsageKB(&vmrss, &vmsize)
-                   ? std::to_string(vmsize) + "KB"
-                   : "cannot read memory usage";
+               ? std::to_string(vmsize) + "KB"
+               : "cannot read memory usage";
     }
 
     void finializeStat();

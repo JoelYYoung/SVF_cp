@@ -1,5 +1,4 @@
 //===- AbstractDomain.h -- Abstract-property lattice API -------*- C++ -*-===//
-//-*-===//
 //
 //                     SVF: Static Value-Flow Analysis
 //

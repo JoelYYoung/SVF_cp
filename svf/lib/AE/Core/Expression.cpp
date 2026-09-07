@@ -48,7 +48,7 @@ Rational LinearExpression::coefficient(Variable variable) const
 }
 
 LinearExpression& LinearExpression::setCoefficient(Variable variable,
-                                                   Rational coefficient)
+        Rational coefficient)
 {
     if (coefficient.isZero())
         terms_.erase(variable);
@@ -211,14 +211,16 @@ std::optional<LinearExpression> TreeExpression::asLinear() const
         return LinearExpression(constant_);
     case Kind::Variable:
         return LinearExpression(variable_);
-    case Kind::Unary: {
+    case Kind::Unary:
+    {
         if (unaryOperator_ != UnaryOperator::Negate)
             return std::nullopt;
         std::optional<LinearExpression> operand = lhs().asLinear();
         return operand ? std::optional<LinearExpression>(-*operand)
-                       : std::nullopt;
+               : std::nullopt;
     }
-    case Kind::Binary: {
+    case Kind::Binary:
+    {
         std::optional<LinearExpression> left = lhs().asLinear();
         std::optional<LinearExpression> right = rhs().asLinear();
         if (!left || !right)

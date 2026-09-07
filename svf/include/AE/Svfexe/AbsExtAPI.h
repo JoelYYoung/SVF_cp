@@ -130,11 +130,11 @@ public:
 
 protected:
     AbstractInterpretation*
-        ae;       ///< Owning AbstractInterpretation; provides state access.
+    ae;       ///< Owning AbstractInterpretation; provides state access.
     SVFIR* svfir; ///< Pointer to the SVF intermediate representation.
     ICFG* icfg;   ///< Pointer to the interprocedural control flow graph.
     Map<std::string, std::function<void(const CallICFGNode*)>>
-        func_map; ///< Map of function names to handlers.
+    func_map; ///< Map of function names to handlers.
 };
 
 } // namespace SVF

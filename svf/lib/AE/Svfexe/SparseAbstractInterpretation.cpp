@@ -28,9 +28,6 @@
 #include "SVFIR/SVFIR.h"
 #include "Util/Options.h"
 
-#include <chrono>
-#include <iomanip>
-#include <iostream>
 #include <optional>
 #include <set>
 
@@ -41,34 +38,6 @@ namespace AD = AbstractDomain;
 
 namespace
 {
-
-template <typename MetricT> class PhaseTimer
-{
-public:
-    PhaseTimer(MetricT& metric, bool enabled)
-        : metric_(metric), enabled_(enabled)
-    {
-        if (enabled_)
-            start_ = Clock::now();
-    }
-
-    ~PhaseTimer()
-    {
-        if (!enabled_)
-            return;
-        ++metric_.calls;
-        metric_.nanoseconds += static_cast<std::uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
-                                                                 start_)
-                .count());
-    }
-
-private:
-    using Clock = std::chrono::steady_clock;
-    MetricT& metric_;
-    bool enabled_;
-    Clock::time_point start_{};
-};
 
 std::set<AD::Variable> nonDefaultVariables(
     const SemiSparseAbstractInterpretation::State& state)
@@ -111,111 +80,15 @@ SemiSparseAbstractInterpretation::findScalarState() const
 }
 
 const AD::AbstractDomain* SemiSparseAbstractInterpretation::
-    getScalarAbstractState() const
+getScalarAbstractState() const
 {
     return findScalarState();
 }
 
 void SemiSparseAbstractInterpretation::handleGlobalNode()
 {
-    PhaseTimer timer(sparseProfile_.globalInitialization,
-                     Options::AESparseProfile());
     Base::handleGlobalNode();
     finalizeAbstractState(this->icfg->getGlobalICFGNode());
-}
-
-void SemiSparseAbstractInterpretation::handleSVFStatement(
-    const SVFStmt* statement)
-{
-    PhaseTimer timer(sparseProfile_.statementTransfer,
-                     Options::AESparseProfile());
-    PhaseMetric* kindMetric = &sparseProfile_.otherTransfer;
-    switch (statement->getEdgeKind())
-    {
-    case SVFStmt::Addr:
-        kindMetric = &sparseProfile_.addressTransfer;
-        break;
-    case SVFStmt::Copy:
-        kindMetric = &sparseProfile_.copyTransfer;
-        break;
-    case SVFStmt::Gep:
-        kindMetric = &sparseProfile_.gepTransfer;
-        break;
-    case SVFStmt::Load:
-        kindMetric = &sparseProfile_.loadTransfer;
-        break;
-    case SVFStmt::Store:
-        kindMetric = &sparseProfile_.storeTransfer;
-        break;
-    default:
-        break;
-    }
-    PhaseTimer kindTimer(*kindMetric, Options::AESparseProfile());
-    Base::handleSVFStatement(statement);
-}
-
-void SemiSparseAbstractInterpretation::runOnModule()
-{
-    {
-        PhaseTimer timer(sparseProfile_.total, Options::AESparseProfile());
-        Base::runOnModule();
-    }
-    if (Options::AESparseProfile())
-        reportSparseProfile();
-}
-
-const char* SemiSparseAbstractInterpretation::sparseProfileMode() const
-{
-    return "semi";
-}
-
-void SemiSparseAbstractInterpretation::reportSparseProfile() const
-{
-    const std::ios::fmtflags previousFlags = std::cout.flags();
-    const std::streamsize previousPrecision = std::cout.precision();
-    auto report = [&](const char* phase, const PhaseMetric& metric) {
-        const double seconds =
-            static_cast<double>(metric.nanoseconds) / 1'000'000'000.0;
-        const double nanosecondsPerCall =
-            metric.calls == 0 ? 0.0
-                              : static_cast<double>(metric.nanoseconds) /
-                                    static_cast<double>(metric.calls);
-        std::cout << "AE_SPARSE_PHASE mode=" << sparseProfileMode()
-                  << " phase=" << phase << " calls=" << metric.calls
-                  << " seconds=" << std::fixed << std::setprecision(6)
-                  << seconds << " ns_per_call=" << std::setprecision(1)
-                  << nanosecondsPerCall << '\n';
-    };
-    report("total", sparseProfile_.total);
-    report("global-initialization", sparseProfile_.globalInitialization);
-    report("statement-transfer", sparseProfile_.statementTransfer);
-    report("transfer-address", sparseProfile_.addressTransfer);
-    report("transfer-copy", sparseProfile_.copyTransfer);
-    report("transfer-gep", sparseProfile_.gepTransfer);
-    report("transfer-load", sparseProfile_.loadTransfer);
-    report("transfer-store", sparseProfile_.storeTransfer);
-    report("transfer-other", sparseProfile_.otherTransfer);
-    report("memory-store", sparseProfile_.memoryStore);
-    report("state-copy", sparseProfile_.stateCopy);
-    report("state-merge", sparseProfile_.stateMerge);
-    report("state-join", sparseProfile_.stateJoin);
-    report("state-equivalence", sparseProfile_.stateEquivalence);
-    report("scalar-materialization", sparseProfile_.scalarMaterialization);
-    report("scalar-refinement", sparseProfile_.scalarRefinement);
-    report("state-filtering", sparseProfile_.stateFiltering);
-    report("cycle", sparseProfile_.cycle);
-    report("svfg-build", sparseProfile_.svfgBuild);
-    report("object-pull", sparseProfile_.objectPull);
-    report("path-feasibility", sparseProfile_.pathFeasibility);
-    report("memory-refinement", sparseProfile_.memoryRefinement);
-    std::cout << "AE_SPARSE_COUNT mode=" << sparseProfileMode()
-              << " metric=unknown-store-calls value="
-              << sparseProfile_.unknownStoreCalls << '\n';
-    std::cout << "AE_SPARSE_COUNT mode=" << sparseProfileMode()
-              << " metric=unknown-store-cells value="
-              << sparseProfile_.unknownStoreCells << '\n';
-    std::cout.flags(previousFlags);
-    std::cout.precision(previousPrecision);
 }
 
 AD::Interval SemiSparseAbstractInterpretation::getInterval(
@@ -225,7 +98,7 @@ AD::Interval SemiSparseAbstractInterpretation::getInterval(
         return AD::Interval::singleton(AD::Rational(integer->getSExtValue()));
     if (const auto* floating = SVFUtil::dyn_cast<ConstFPValVar>(value))
         return AD::Interval::singleton(
-            AD::Rational::fromDouble(floating->getFPValue()));
+                   AD::Rational::fromDouble(floating->getFPValue()));
     if (!value)
         return AD::Interval::top();
     if (value->isPointer())
@@ -237,7 +110,7 @@ AD::Interval SemiSparseAbstractInterpretation::getInterval(
     const AD::Variable variable = this->adapter_.variable(*value);
     AD::Interval result = scalars.numerical().bound(variable);
     // Conditional-edge refinement is intentionally local to the ICFG state.
-    // Read it in addition to the definition-site scalar carrier so transfer
+    // Read it in addition to the module-wide scalar carrier so transfer
     // functions observe path constraints without copying all SSA values into
     // every program point.
     if (node && this->hasAbsState(node))
@@ -275,11 +148,9 @@ bool SemiSparseAbstractInterpretation::hasAbsValue(
 {
     (void)node;
     if (SVFUtil::isa<ConstIntValVar>(value) ||
-        SVFUtil::isa<ConstFPValVar>(value))
+            SVFUtil::isa<ConstFPValVar>(value))
         return true;
-    if (!value || !this->adapter_.contains(*value))
-        return false;
-    return this->adapter_.contains(*value);
+    return value && this->adapter_.contains(*value);
 }
 
 void SemiSparseAbstractInterpretation::updateValue(
@@ -295,7 +166,6 @@ void SemiSparseAbstractInterpretation::updateValue(
 void SemiSparseAbstractInterpretation::copyAbstractState(
     const ICFGNode* source, const ICFGNode* destination)
 {
-    PhaseTimer timer(sparseProfile_.stateCopy, Options::AESparseProfile());
     this->stateTrace_.insert_or_assign(destination, this->state(source));
 }
 
@@ -308,17 +178,8 @@ void SemiSparseAbstractInterpretation::resetAbstractState(
 void SemiSparseAbstractInterpretation::finalizeAbstractState(
     const ICFGNode* node)
 {
-    PhaseTimer timer(sparseProfile_.stateFiltering, Options::AESparseProfile());
     State& denseState = this->ensureState(node);
     forgetActiveScalarValues(denseState);
-}
-
-bool SemiSparseAbstractInterpretation::isAbstractStateEquivalent(
-    const ICFGNode* node, const AD::AbstractDomain& snapshot) const
-{
-    PhaseTimer timer(sparseProfile_.stateEquivalence,
-                     Options::AESparseProfile());
-    return Base::isAbstractStateEquivalent(node, snapshot);
 }
 
 void SemiSparseAbstractInterpretation::forgetActiveScalarValues(
@@ -327,10 +188,10 @@ void SemiSparseAbstractInterpretation::forgetActiveScalarValues(
     const AD::Variable contentBegin =
         this->adapter_.firstObjectContentVariable();
     for (AD::Variable variable :
-         denseState.numerical().constrainedVariablesBefore(contentBegin))
+            denseState.numerical().constrainedVariablesBefore(contentBegin))
         denseState.numerical().forget(variable);
     for (AD::Variable variable :
-         denseState.addresses().nonDefaultVariablesBefore(contentBegin))
+            denseState.addresses().nonDefaultVariablesBefore(contentBegin))
         denseState.addresses().forget(variable);
 }
 
@@ -347,8 +208,6 @@ void SemiSparseAbstractInterpretation::forgetMemoryValues(
 void SemiSparseAbstractInterpretation::applyScalarRefinement(
     State& denseState, const State& checkpoint)
 {
-    PhaseTimer timer(sparseProfile_.scalarRefinement,
-                     Options::AESparseProfile());
     for (AD::Variable variable : checkpoint.numerical().constrainedVariables())
     {
         const ValVar* value = this->adapter_.value(variable);
@@ -363,8 +222,6 @@ void SemiSparseAbstractInterpretation::applyScalarRefinement(
 void SemiSparseAbstractInterpretation::materializeValue(
     State& denseState, const ValVar* value, const ICFGNode* node)
 {
-    PhaseTimer timer(sparseProfile_.scalarMaterialization,
-                     Options::AESparseProfile());
     if (!value || !this->adapter_.contains(*value))
         return;
     if (!value->isPointer())
@@ -387,18 +244,6 @@ void SemiSparseAbstractInterpretation::storeValue(
     const ValVar* pointer, const AD::Interval& interval,
     const AD::AddressSet& addresses, const ICFGNode* node)
 {
-    PhaseTimer timer(sparseProfile_.memoryStore, Options::AESparseProfile());
-    if (Options::AESparseProfile() && pointer &&
-        this->adapter_.contains(*pointer))
-    {
-        const AD::AddressSet pointees = getAddressSet(pointer, node);
-        if (pointees.isTop())
-        {
-            ++sparseProfile_.unknownStoreCalls;
-            sparseProfile_.unknownStoreCells +=
-                this->ensureState(node).memoryLayout().cells().size();
-        }
-    }
     Base::storeValue(pointer, interval, addresses, node);
     if (pointer && this->adapter_.contains(*pointer))
         this->forgetValue(this->ensureState(node),
@@ -411,16 +256,9 @@ void SemiSparseAbstractInterpretation::filterPropagatedState(
     (void)denseState;
 }
 
-void SemiSparseAbstractInterpretation::collectMemoryBranchRefinement(
-    const IntraCFGEdge* edge, State& state)
-{
-    this->collectBranchRefinement(edge, state);
-}
-
 bool SemiSparseAbstractInterpretation::mergeStatesFromPredecessors(
     const ICFGNode* node)
 {
-    PhaseTimer timer(sparseProfile_.stateMerge, Options::AESparseProfile());
     State merged = flowState(true);
     std::optional<State> mergedRefinement;
     bool refinementIsTop = false;
@@ -459,8 +297,8 @@ bool SemiSparseAbstractInterpretation::mergeStatesFromPredecessors(
         if (needsRefinement)
         {
             refinement = refinementIterator != refinementTrace_.end()
-                             ? refinementIterator->second
-                             : this->topState();
+                         ? refinementIterator->second
+                         : this->topState();
             if (hasConditional)
                 this->assumeBranch(conditional, *refinement);
             if (refinement->isBottom())
@@ -470,13 +308,9 @@ bool SemiSparseAbstractInterpretation::mergeStatesFromPredecessors(
         State source = this->state(predecessor);
         filterPropagatedState(source);
         if (hasConditional)
-            collectMemoryBranchRefinement(conditional, source);
+            this->collectBranchRefinement(conditional, source);
 
-        {
-            PhaseTimer joinTimer(sparseProfile_.stateJoin,
-                                 Options::AESparseProfile());
-            merged.joinWith(source);
-        }
+        merged.joinWith(source);
         if (!refinement || refinement->isTop())
         {
             refinementIsTop = true;
@@ -509,9 +343,8 @@ bool SemiSparseAbstractInterpretation::mergeStatesFromPredecessors(
 }
 
 std::unique_ptr<AD::AbstractDomain> SemiSparseAbstractInterpretation::
-    cloneCycleHeadState(const ICFGCycleWTO* cycle)
+cloneCycleHeadState(const ICFGCycleWTO* cycle)
 {
-    PhaseTimer timer(sparseProfile_.cycle, Options::AESparseProfile());
     const ICFGNode* head = cycle->head()->getICFGNode();
     State snapshot = this->state(head);
     for (const ValVar* value : this->preAnalysis->getCycleValVars(cycle))
@@ -534,10 +367,10 @@ void SemiSparseAbstractInterpretation::scatterCycleValues(
         const AD::Variable variable = this->adapter_.variable(*value);
         updateValue(value,
                     value->isPointer() ? AD::Interval::bottom()
-                                       : cycleState.numerical().bound(variable),
+                    : cycleState.numerical().bound(variable),
                     value->isPointer()
-                        ? cycleState.addresses().addressSet(variable)
-                        : AD::AddressSet::bottom(),
+                    ? cycleState.addresses().addressSet(variable)
+                    : AD::AddressSet::bottom(),
                     cycle->head()->getICFGNode());
     }
 }
@@ -546,7 +379,6 @@ bool SemiSparseAbstractInterpretation::widenCycleState(
     const AD::AbstractDomain& previous, const AD::AbstractDomain& current,
     const ICFGCycleWTO* cycle)
 {
-    PhaseTimer timer(sparseProfile_.cycle, Options::AESparseProfile());
     const bool fixpoint = Base::widenCycleState(previous, current, cycle);
     scatterCycleValues(cycle, this->state(cycle->head()->getICFGNode()));
     finalizeAbstractState(cycle->head()->getICFGNode());
@@ -557,7 +389,6 @@ bool SemiSparseAbstractInterpretation::narrowCycleState(
     const AD::AbstractDomain& previous, const AD::AbstractDomain& current,
     const ICFGCycleWTO* cycle)
 {
-    PhaseTimer timer(sparseProfile_.cycle, Options::AESparseProfile());
     const bool fixpoint = Base::narrowCycleState(previous, current, cycle);
     if (!fixpoint)
     {
@@ -575,7 +406,7 @@ bool hasRedefinitionOf(const ICFGNode* node, const IndirectSVFGEdge* edge)
     for (const VFGNode* valueFlowNode : node->getVFGNodes())
     {
         if (SVFUtil::isa<StoreVFGNode>(valueFlowNode) &&
-            valueFlowNode->getDefSVFVars().intersects(edge->getPointsTo()))
+                valueFlowNode->getDefSVFVars().intersects(edge->getPointsTo()))
             return true;
     }
     return false;
@@ -585,25 +416,16 @@ bool hasRedefinitionOf(const ICFGNode* node, const IndirectSVFGEdge* edge)
 
 FullSparseAbstractInterpretation::FullSparseAbstractInterpretation()
 {
-    PhaseTimer timer(this->sparseProfile_.svfgBuild,
-                     Options::AESparseProfile());
     svfgBuilder_ = std::make_unique<SVFGBuilder>(true);
     svfgBuilder_->buildFullSVFG(this->preAnalysis->getPointerAnalysis());
 }
 
 FullSparseAbstractInterpretation::
-    ~FullSparseAbstractInterpretation() = default;
-
-const char* FullSparseAbstractInterpretation::sparseProfileMode() const
-{
-    return "full";
-}
+~FullSparseAbstractInterpretation() = default;
 
 void FullSparseAbstractInterpretation::filterPropagatedState(
     State& denseState) const
 {
-    PhaseTimer timer(this->sparseProfile_.stateFiltering,
-                     Options::AESparseProfile());
     this->forgetActiveScalarValues(denseState);
     for (AD::Variable variable : nonDefaultVariables(denseState))
     {
@@ -611,12 +433,6 @@ void FullSparseAbstractInterpretation::filterPropagatedState(
         if (object && !SVFUtil::isa<GepObjVar>(object))
             this->forgetValue(denseState, variable);
     }
-}
-
-void FullSparseAbstractInterpretation::collectMemoryBranchRefinement(
-    const IntraCFGEdge* edge, State& state)
-{
-    this->collectBranchRefinement(edge, state);
 }
 
 void FullSparseAbstractInterpretation::recordBranchRefinement(
@@ -668,8 +484,6 @@ bool FullSparseAbstractInterpretation::mergeStatesFromPredecessors(
 void FullSparseAbstractInterpretation::pullObjectValueFlows(
     const ICFGNode* node)
 {
-    PhaseTimer timer(this->sparseProfile_.objectPull,
-                     Options::AESparseProfile());
     NodeBS denseLocalObjects;
     const State& destination = this->state(node);
     for (AD::Variable variable : nonDefaultVariables(destination))
@@ -683,12 +497,12 @@ void FullSparseAbstractInterpretation::pullObjectValueFlows(
     for (const VFGNode* valueFlowNode : node->getVFGNodes())
     {
         for (auto edgeIterator = valueFlowNode->InEdgeBegin();
-             edgeIterator != valueFlowNode->InEdgeEnd(); ++edgeIterator)
+                edgeIterator != valueFlowNode->InEdgeEnd(); ++edgeIterator)
         {
             const auto* indirect =
                 SVFUtil::dyn_cast<IndirectSVFGEdge>(*edgeIterator);
             if (!indirect ||
-                !isIndirectSVFGEdgeFeasible(indirect, valueFlowNode))
+                    !isIndirectSVFGEdgeFeasible(indirect, valueFlowNode))
                 continue;
 
             const auto* sourceNode =
@@ -715,7 +529,7 @@ void FullSparseAbstractInterpretation::pullObjectValueFlows(
                     if (denseLocalObjects.test(fieldId))
                         continue;
                     const auto* object = SVFUtil::dyn_cast<ObjVar>(
-                        this->svfir->getGNode(fieldId));
+                                             this->svfir->getGNode(fieldId));
                     if (!object)
                         continue;
 
@@ -746,8 +560,6 @@ bool FullSparseAbstractInterpretation::isIntraEdgeBranchFeasible(
 bool FullSparseAbstractInterpretation::isIndirectSVFGEdgeFeasible(
     const IndirectSVFGEdge* edge, const VFGNode* destination)
 {
-    PhaseTimer timer(this->sparseProfile_.pathFeasibility,
-                     Options::AESparseProfile());
     assert(edge && destination && "SVFG edge and destination must exist");
     const auto* sourceNode = SVFUtil::dyn_cast<SVFGNode>(edge->getSrcNode());
     assert(sourceNode && "indirect SVFG edge must have an SVFG source");
@@ -787,7 +599,7 @@ bool FullSparseAbstractInterpretation::isIndirectSVFGEdgeFeasible(
             const auto* intra = SVFUtil::dyn_cast<IntraCFGEdge>(cfgEdge);
             const ICFGNode* successor = intra ? intra->getDstNode() : nullptr;
             if (!successor || successor->getFun() != function ||
-                !isIntraEdgeBranchFeasible(intra, current))
+                    !isIntraEdgeBranchFeasible(intra, current))
                 continue;
             if (successor == target)
                 return true;
@@ -801,8 +613,6 @@ bool FullSparseAbstractInterpretation::isIndirectSVFGEdgeFeasible(
 void FullSparseAbstractInterpretation::propagateAndApplyMemoryRefinement(
     const ICFGNode* node)
 {
-    PhaseTimer timer(this->sparseProfile_.memoryRefinement,
-                     Options::AESparseProfile());
     Map<NodeID, AD::Interval> inherited;
     bool canInherit = true;
     bool first = true;

@@ -15,15 +15,6 @@ set(ABSTRACT_DOMAIN_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/Expression.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/NumericalDomain.cpp
 )
-set(ABSTRACT_DOMAIN_INTEGRATION_HEADERS
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/SparseAbstractInterpretation.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/SVFIRAdapter.h
-)
-set(ABSTRACT_DOMAIN_INTEGRATION_SOURCES
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/SparseAbstractInterpretation.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/SVFIRAdapter.cpp
-)
-
 add_library(AbstractDomainCore)
 add_library(SVF::AbstractDomainCore ALIAS AbstractDomainCore)
 target_compile_features(AbstractDomainCore PUBLIC cxx_std_17)

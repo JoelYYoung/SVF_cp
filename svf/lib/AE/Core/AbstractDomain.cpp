@@ -98,7 +98,7 @@ CheckResult AbstractDomain::isEquivalentTo(const AbstractDomain& other) const
 {
     requireCompatible(other);
     return leqDomain(other) && other.leqDomain(*this) ? CheckResult::True
-                                                      : CheckResult::False;
+           : CheckResult::False;
 }
 
 std::string AbstractDomain::toString() const

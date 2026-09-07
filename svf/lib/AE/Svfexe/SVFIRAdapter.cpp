@@ -95,7 +95,7 @@ AbstractDomain::NumericType contentNumericType(const ObjVar& object)
     const StInfo* typeInfo = baseType->getTypeInfo();
     const auto& elementTypes =
         Options::ModelArrays() ? typeInfo->getFlattenElementTypes()
-                               : typeInfo->getFlattenFieldTypes();
+        : typeInfo->getFlattenFieldTypes();
     const auto offset = static_cast<std::size_t>(gep->getConstantFieldIdx());
     if (offset >= elementTypes.size())
         return AbstractDomain::NumericType::real();
@@ -123,7 +123,8 @@ Location nextLocation(std::uint64_t& next)
 
 SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
 {
-    auto addScalars = [&](bool pointers) {
+    auto addScalars = [&](bool pointers)
+    {
         for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
         {
             const SVFVar* svfVariable = iterator->second;
@@ -144,7 +145,8 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
         }
     };
 
-    auto addObjectContents = [&](bool pointers) {
+    auto addObjectContents = [&](bool pointers)
+    {
         for (auto iterator = svfir.begin(); iterator != svfir.end(); ++iterator)
         {
             const SVFVar* svfVariable = iterator->second;
@@ -213,8 +215,8 @@ Variable SVFIRAdapter::variable(const ValVar& value) const
 const ValVar* SVFIRAdapter::value(Variable variable) const
 {
     return variable.id() < valuesByVariableId_.size()
-               ? valuesByVariableId_[variable.id()]
-               : nullptr;
+           ? valuesByVariableId_[variable.id()]
+           : nullptr;
 }
 
 Location SVFIRAdapter::location(const ObjVar& object) const
@@ -234,8 +236,8 @@ Variable SVFIRAdapter::contentVariable(const ObjVar& object) const
 const ObjVar* SVFIRAdapter::contentObject(Variable variable) const
 {
     return variable.id() < contentObjectsByVariableId_.size()
-               ? contentObjectsByVariableId_[variable.id()]
-               : nullptr;
+           ? contentObjectsByVariableId_[variable.id()]
+           : nullptr;
 }
 
 bool SVFIRAdapter::isPointer(Variable variable) const

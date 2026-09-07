@@ -800,9 +800,6 @@ const OptionMap<u32_t> Options::AEFunEntry(
 });
 const Option<u32_t> Options::WidenDelay(
     "widen-delay", "Loop Widen Delay", 3);
-const Option<bool> Options::AESparseProfile(
-    "ae-sparse-profile",
-    "Print inclusive phase timings for native semi/full-sparse AE", false);
 const OptionMap<u32_t> Options::HandleRecur(
     "handle-recur",
     "Recursion handling mode in abstract execution (Default -widen-narrow)",

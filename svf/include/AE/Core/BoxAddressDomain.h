@@ -144,7 +144,7 @@ public:
     }
 
     BoxAddressDomain(BoxDomain numerical, MemoryLayout memoryLayout,
-                    AddressDomain addresses, LifetimeDomain lifetimes)
+                     AddressDomain addresses, LifetimeDomain lifetimes)
         : numerical_(std::move(numerical)),
           memoryLayout_(std::move(memoryLayout)),
           addresses_(std::move(addresses)), lifetimes_(std::move(lifetimes))
@@ -326,8 +326,8 @@ private:
     bool hasCompatibleDomain(const AbstractDomain& other) const override
     {
         const auto* product = other.isDomain<BoxAddressDomain>()
-                                  ? &static_cast<const BoxAddressDomain&>(other)
-                                  : nullptr;
+                              ? &static_cast<const BoxAddressDomain&>(other)
+                              : nullptr;
         return product && memoryLayout_ == product->memoryLayout_ &&
                numerical_.config().operationCompatible(
                    product->numerical_.config());

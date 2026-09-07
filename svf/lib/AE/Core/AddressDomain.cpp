@@ -47,8 +47,8 @@ FiniteLocationSet& FiniteLocationSet::operator=(
     size_ = other.size_;
     inline_ = other.inline_;
     overflow_ = other.overflow_
-                    ? std::make_unique<std::vector<Location>>(*other.overflow_)
-                    : nullptr;
+                ? std::make_unique<std::vector<Location>>(*other.overflow_)
+                : nullptr;
     return *this;
 }
 
@@ -96,7 +96,7 @@ void FiniteLocationSet::insert(Location location)
     if (!overflow_)
     {
         overflow_ = std::make_unique<std::vector<Location>>(inline_.begin(),
-                                                             inline_.end());
+            inline_.end());
         overflow_->reserve(InlineCapacity * 2);
     }
     overflow_->insert(overflow_->begin() + index, location);
@@ -169,7 +169,8 @@ bool AddressSet::hasIntersection(const AddressSet& other) const
     const auto* larger = &other.locations_;
     if (larger->size() < smaller->size())
         std::swap(smaller, larger);
-    return std::any_of(smaller->begin(), smaller->end(), [&](Location location) {
+    return std::any_of(smaller->begin(), smaller->end(), [&](Location location)
+    {
         return larger->contains(location);
     });
 }
@@ -323,7 +324,7 @@ std::vector<Variable> AddressDomain::nonDefaultVariables() const
         {
             if (entry.page->values[slot])
                 variables.emplace_back(static_cast<std::uint32_t>(
-                    entry.index * ValuesPerPage + slot));
+                                           entry.index * ValuesPerPage + slot));
         }
     }
     return variables;
@@ -353,7 +354,7 @@ std::vector<Variable> AddressDomain::nonDefaultVariablesBefore(
             if (!entry.page->values[slot])
                 continue;
             const Variable variable(static_cast<std::uint32_t>(
-                entry.index * ValuesPerPage + slot));
+                                        entry.index * ValuesPerPage + slot));
             if (variable.id() < upperBound.id())
                 variables.push_back(variable);
         }
@@ -500,18 +501,22 @@ const AddressSet* AddressDomain::findValue(Variable variable) const
     if (!paged_)
     {
         const auto iterator = std::lower_bound(
-            smallValues_->begin(), smallValues_->end(), variable,
-            [](const Value& value, Variable key) { return value.first < key; });
+                                  smallValues_->begin(), smallValues_->end(), variable,
+                                  [](const Value& value, Variable key)
+        {
+            return value.first < key;
+        });
         return iterator != smallValues_->end() && iterator->first == variable
-                   ? &iterator->second
-                   : nullptr;
+               ? &iterator->second
+               : nullptr;
     }
     const std::size_t pageIndex = variable.id() / ValuesPerPage;
     const auto iterator = std::lower_bound(
-        pages_.begin(), pages_.end(), pageIndex,
-        [](const ValuePageEntry& entry, std::size_t index) {
-            return entry.index < index;
-        });
+                              pages_.begin(), pages_.end(), pageIndex,
+                              [](const ValuePageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (iterator == pages_.end() || iterator->index != pageIndex)
         return nullptr;
     const std::optional<AddressSet>& value =
@@ -525,8 +530,11 @@ void AddressDomain::storeValue(Variable variable, AddressSet addresses)
     {
         SmallValues& values = writableSmallValues();
         auto iterator = std::lower_bound(
-            values.begin(), values.end(), variable,
-            [](const Value& value, Variable key) { return value.first < key; });
+                            values.begin(), values.end(), variable,
+                            [](const Value& value, Variable key)
+        {
+            return value.first < key;
+        });
         if (iterator != values.end() && iterator->first == variable)
         {
             iterator->second = std::move(addresses);
@@ -540,7 +548,7 @@ void AddressDomain::storeValue(Variable variable, AddressSet addresses)
     }
     std::optional<AddressSet>& slot =
         writablePage(variable.id() / ValuesPerPage)
-            .values[variable.id() % ValuesPerPage];
+        .values[variable.id() % ValuesPerPage];
     if (!slot)
         ++size_;
     slot = std::move(addresses);
@@ -552,8 +560,11 @@ void AddressDomain::eraseValue(Variable variable)
     {
         SmallValues& values = writableSmallValues();
         const auto iterator = std::lower_bound(
-            values.begin(), values.end(), variable,
-            [](const Value& value, Variable key) { return value.first < key; });
+                                  values.begin(), values.end(), variable,
+                                  [](const Value& value, Variable key)
+        {
+            return value.first < key;
+        });
         if (iterator != values.end() && iterator->first == variable)
         {
             values.erase(iterator);
@@ -563,10 +574,11 @@ void AddressDomain::eraseValue(Variable variable)
     }
     const std::size_t pageIndex = variable.id() / ValuesPerPage;
     auto iterator = std::lower_bound(
-        pages_.begin(), pages_.end(), pageIndex,
-        [](const ValuePageEntry& entry, std::size_t index) {
-            return entry.index < index;
-        });
+                        pages_.begin(), pages_.end(), pageIndex,
+                        [](const ValuePageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (iterator == pages_.end() || iterator->index != pageIndex)
         return;
     if (iterator->page.use_count() != 1)
@@ -603,13 +615,14 @@ AddressDomain::SmallValues& AddressDomain::writableSmallValues()
 AddressDomain::ValuePage& AddressDomain::writablePage(std::size_t pageIndex)
 {
     auto iterator = std::lower_bound(
-        pages_.begin(), pages_.end(), pageIndex,
-        [](const ValuePageEntry& entry, std::size_t index) {
-            return entry.index < index;
-        });
+                        pages_.begin(), pages_.end(), pageIndex,
+                        [](const ValuePageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (iterator == pages_.end() || iterator->index != pageIndex)
         iterator = pages_.insert(
-            iterator, {pageIndex, std::make_shared<ValuePage>()});
+                       iterator, {pageIndex, std::make_shared<ValuePage>()});
     else if (iterator->page.use_count() != 1)
         iterator->page = std::make_shared<ValuePage>(*iterator->page);
     return *iterator->page;
@@ -618,9 +631,10 @@ AddressDomain::ValuePage& AddressDomain::writablePage(std::size_t pageIndex)
 bool AddressDomain::pageIsEmpty(const ValuePage& page)
 {
     return std::none_of(page.values.begin(), page.values.end(),
-                        [](const std::optional<AddressSet>& value) {
-                            return value.has_value();
-                        });
+                        [](const std::optional<AddressSet>& value)
+    {
+        return value.has_value();
+    });
 }
 
 void AddressDomain::makeBottom()

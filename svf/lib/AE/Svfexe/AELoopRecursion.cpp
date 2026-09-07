@@ -56,10 +56,10 @@ void AbstractInterpretation::skipRecursionWithTop(const CallICFGNode* callNode)
     if (retNode->getSVFStmts().size() > 0)
     {
         if (const RetPE* retPE =
-                SVFUtil::dyn_cast<RetPE>(*retNode->getSVFStmts().begin()))
+                    SVFUtil::dyn_cast<RetPE>(*retNode->getSVFStmts().begin()))
         {
             if (!retPE->getLHSVar()->isPointer() &&
-                !retPE->getLHSVar()->isConstDataOrAggDataButNotNullPtr())
+                    !retPE->getLHSVar()->isConstDataOrAggDataButNotNullPtr())
                 updateInterval(retPE->getLHSVar(),
                                AbstractDomain::Interval::top(), callNode);
         }
@@ -72,7 +72,7 @@ void AbstractInterpretation::skipRecursionWithTop(const CallICFGNode* callNode)
         return;
     }
     for (const SVFBasicBlock* bb :
-         callNode->getCalledFunction()->getReachableBBs())
+            callNode->getCalledFunction()->getReachableBBs())
     {
         for (const ICFGNode* node : bb->getICFGNodeList())
         {
@@ -82,7 +82,7 @@ void AbstractInterpretation::skipRecursionWithTop(const CallICFGNode* callNode)
                 {
                     const SVFVar* rhsVar = store->getRHSVar();
                     if (!rhsVar->isPointer() &&
-                        !rhsVar->isConstDataOrAggDataButNotNullPtr())
+                            !rhsVar->isConstDataOrAggDataButNotNullPtr())
                     {
                         const AbstractDomain::AddressSet addresses =
                             getAddressSet(store->getLHSVar(), callNode);
@@ -109,11 +109,11 @@ void AbstractInterpretation::skipRecursionWithTop(const CallICFGNode* callNode)
 /// Check if caller and callee are in the same CallGraph SCC (i.e. a recursive
 /// callsite)
 bool AbstractInterpretation::isRecursiveCallSite(const CallICFGNode* callNode,
-                                                 const FunObjVar* callee)
+        const FunObjVar* callee)
 {
     const FunObjVar* caller = callNode->getCaller();
     return preAnalysis->getPointerAnalysis()->inSameCallGraphSCC(caller,
-                                                                 callee);
+            callee);
 }
 
 /// Skip recursive callsites (within SCC); entry calls from outside SCC are not
@@ -162,7 +162,7 @@ bool AbstractInterpretation::shouldApplyNarrowing(const FunObjVar* fun)
 }
 
 std::unique_ptr<AbstractDomain::AbstractDomain> AbstractInterpretation::
-    cloneCycleHeadState(const ICFGCycleWTO* cycle)
+cloneCycleHeadState(const ICFGCycleWTO* cycle)
 {
     return cloneAbstractState(cycle->head()->getICFGNode());
 }
@@ -198,7 +198,7 @@ bool AbstractInterpretation::narrowCycleState(
     // that the meet would be exactly currentDense. False and Unknown retain
     // the original conservative meet.
     if (currentDense.isSubsetOf(previousDense) !=
-        AbstractDomain::CheckResult::True)
+            AbstractDomain::CheckResult::True)
         currentDense.meetWith(previousDense);
     State next = previousDense;
     next.narrowWith(currentDense);
@@ -248,7 +248,7 @@ bool AbstractInterpretation::narrowCycleState(
 // =====================================================================
 
 void AbstractInterpretation::handleLoopOrRecursion(const ICFGCycleWTO* cycle,
-                                                   const CallICFGNode* caller)
+        const CallICFGNode* caller)
 {
     const ICFGNode* cycle_head = cycle->head()->getICFGNode();
 
@@ -307,7 +307,7 @@ void AbstractInterpretation::handleLoopOrRecursion(const ICFGCycleWTO* cycle,
         for (const ICFGWTOComp* comp : cycle->getWTOComponents())
         {
             if (const ICFGSingletonWTO* singleton =
-                    SVFUtil::dyn_cast<ICFGSingletonWTO>(comp))
+                        SVFUtil::dyn_cast<ICFGSingletonWTO>(comp))
             {
                 const ICFGNode* node = singleton->getICFGNode();
                 if (mergeStatesFromPredecessors(node))
@@ -317,7 +317,7 @@ void AbstractInterpretation::handleLoopOrRecursion(const ICFGCycleWTO* cycle,
                          SVFUtil::dyn_cast<ICFGCycleWTO>(comp))
             {
                 if (mergeStatesFromPredecessors(
-                        subCycle->head()->getICFGNode()))
+                            subCycle->head()->getICFGNode()))
                     handleLoopOrRecursion(subCycle, caller);
             }
         }

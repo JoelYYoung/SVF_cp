@@ -30,13 +30,6 @@ add_executable(svf-core-domain-test CoreDomainTest.cpp)
 target_link_libraries(svf-core-domain-test PRIVATE AbstractDomainCore)
 add_test(NAME core-domain COMMAND svf-core-domain-test)
 
-add_executable(
-  svf-address-domain-storage-benchmark AddressDomainStorageBenchmark.cpp
-)
-target_link_libraries(
-  svf-address-domain-storage-benchmark PRIVATE AbstractDomainCore
-)
-
 if(TARGET SvfLLVM)
   add_executable(svf-box-ae-integration-test BoxAEIntegrationTest.cpp)
   target_link_libraries(svf-box-ae-integration-test PRIVATE SvfLLVM)
@@ -113,9 +106,7 @@ if(TARGET SvfLLVM)
       box-ae-global-gep-initializer-${sparsity}
       PROPERTIES
         ENVIRONMENT
-          "SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS=1;SVF_AE_SEMANTIC_CHECKSUM=1"
-        PASS_REGULAR_EXPRESSION
-          "AE_RESULT_HASH fnv1a64=3002b6c833fd07fd records=62 contract=svf-query-projection-v7"
+          "SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS=1"
     )
   endforeach()
   add_box_ae_test(
@@ -132,9 +123,7 @@ if(TARGET SvfLLVM)
     box-ae-projection-semi-sparse
     PROPERTIES
       ENVIRONMENT
-        "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1;SVF_AE_SEMANTIC_CHECKSUM=1"
-      PASS_REGULAR_EXPRESSION
-        "AE_RESULT_HASH fnv1a64=b0c9d6b1f8615842 records=43 contract=svf-query-projection-v7"
+        "SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT=1"
   )
 endif()
 

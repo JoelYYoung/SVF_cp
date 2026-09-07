@@ -62,7 +62,7 @@ void AEStat::finializeStat()
             funs.insert(it.second->getFun());
             // Check if this node was analyzed (across all entry points)
             if (_ae->allAnalyzedNodes.find(it.second) !=
-                _ae->allAnalyzedNodes.end())
+                    _ae->allAnalyzedNodes.end())
             {
                 analyzedFuns.insert(it.second->getFun());
             }
@@ -106,8 +106,8 @@ void AEStat::performStat()
     const std::string fullName(_ae->svfir->getModuleIdentifier());
     const std::size_t separator = fullName.find_last_of("/\\");
     const std::string name = separator == std::string::npos
-                                 ? fullName
-                                 : fullName.substr(separator + 1);
+                             ? fullName
+                             : fullName.substr(separator + 1);
     const std::string moduleName = name.substr(0, name.find('.'));
 
     SVFUtil::outs() << "\n************************\n";
@@ -116,12 +116,12 @@ void AEStat::performStat()
     SVFUtil::outs().flags(std::ios::left);
     unsigned field_width = 30;
     for (NUMStatMap::iterator it = generalNumMap.begin(),
-                              eit = generalNumMap.end();
-         it != eit; ++it)
+            eit = generalNumMap.end();
+            it != eit; ++it)
     {
         // Special handling for percentage fields (stored as percentage * 100)
         if (it->first == "ICFG_Coverage_Percent" ||
-            it->first == "Func_Coverage_Percent")
+                it->first == "Func_Coverage_Percent")
         {
             double percent = (double)it->second / 100.0;
             std::cout << std::setw(field_width) << it->first << std::fixed
@@ -134,10 +134,10 @@ void AEStat::performStat()
         }
     }
     SVFUtil::outs()
-        << "-------------------------------------------------------\n";
+            << "-------------------------------------------------------\n";
     for (TIMEStatMap::iterator it = timeStatMap.begin(),
-                               eit = timeStatMap.end();
-         it != eit; ++it)
+            eit = timeStatMap.end();
+            it != eit; ++it)
     {
         // format out put with width 20 space
         SVFUtil::outs() << std::setw(field_width) << it->first << it->second

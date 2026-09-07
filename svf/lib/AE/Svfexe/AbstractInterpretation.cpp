@@ -49,12 +49,13 @@ static std::vector<const ICFGEdge*> orderedIncomingEdges(const ICFGNode* node)
     std::vector<const ICFGEdge*> edges(node->getInEdges().begin(),
                                        node->getInEdges().end());
     std::sort(edges.begin(), edges.end(),
-              [](const ICFGEdge* lhs, const ICFGEdge* rhs) {
-                  return std::make_tuple(lhs->getSrcID(),
-                                         lhs->getEdgeKindWithoutMask()) <
-                         std::make_tuple(rhs->getSrcID(),
-                                         rhs->getEdgeKindWithoutMask());
-              });
+              [](const ICFGEdge* lhs, const ICFGEdge* rhs)
+    {
+        return std::make_tuple(lhs->getSrcID(),
+                               lhs->getEdgeKindWithoutMask()) <
+               std::make_tuple(rhs->getSrcID(),
+                               rhs->getEdgeKindWithoutMask());
+    });
     return edges;
 }
 
@@ -66,7 +67,7 @@ void AbstractInterpretation::handleGlobalNode()
         handleSVFStatement(statement);
 
     if (const auto* variable = SVFUtil::dyn_cast<ValVar>(
-            svfir->getGNode(PAG::getPAG()->getBlkPtr())))
+                                   svfir->getGNode(PAG::getPAG()->getBlkPtr())))
         updateValue(variable, AD::Interval::top(), AD::AddressSet::top(), node);
 }
 
@@ -81,7 +82,7 @@ void AbstractInterpretation::initializeObjectValue(
 
     const BaseObjVar* base = PAG::getPAG()->getBaseObject(object->getId());
     if (base->isConstDataOrConstGlobal() || base->isConstantArray() ||
-        base->isConstantStruct())
+            base->isConstantStruct())
     {
         if (const auto* integer = SVFUtil::dyn_cast<ConstIntObjVar>(object))
             interval =
@@ -89,7 +90,7 @@ void AbstractInterpretation::initializeObjectValue(
         else if (const auto* floating =
                      SVFUtil::dyn_cast<ConstFPObjVar>(object))
             interval = AD::Interval::singleton(
-                AD::Rational::fromDouble(floating->getFPValue()));
+                           AD::Rational::fromDouble(floating->getFPValue()));
         else if (SVFUtil::isa<ConstNullPtrObjVar>(object))
             addresses = AD::AddressSet::singleton(AD::Location::null());
         else if (!SVFUtil::isa<GlobalObjVar>(object))
@@ -138,7 +139,8 @@ AbstractInterpretation& AbstractInterpretation::getAEInstance()
     // Keep the singleton alive until process exit. Several owned analysis
     // objects refer to process-global SVF state whose destruction order is
     // outside AE's control.
-    static AbstractInterpretation* instance = []() -> AbstractInterpretation* {
+    static AbstractInterpretation* instance = []() -> AbstractInterpretation*
+    {
         switch (Options::AESparsity())
         {
         case AESparsity::SemiSparse:
@@ -233,8 +235,8 @@ FIFOWorkList<const FunObjVar*> AbstractInterpretation::collectProgEntryFuns()
     if (mainEntry && entryFunctions.empty())
     {
         SVFUtil::errs() << SVFUtil::errMsg(
-            "AE -ae-fun-entry=main requires a program entry function, but "
-            "main/svf.main was not found.\n");
+                            "AE -ae-fun-entry=main requires a program entry function, but "
+                            "main/svf.main was not found.\n");
         assert(false &&
                "No program entry function found for -ae-fun-entry=main");
         abort();
@@ -314,15 +316,16 @@ static const LoadStmt* findBackingLoad(const SVFVar* var)
 /// [6, +inf). On the false branch (succ=0), %a is constrained to (-inf, 5].
 /// The result is used to narrow the ObjVar behind %a's load.
 static AD::Interval computeCmpConstraint(s32_t predicate, s64_t succ,
-                                         bool isLHS, const AD::Interval& self,
-                                         const AD::Interval& other)
+        bool isLHS, const AD::Interval& self,
+        const AD::Interval& other)
 {
     // Normalize: always reason from the LHS perspective.
     // If we are the RHS operand, swap the predicate direction.
     if (!isLHS)
     {
         // a > b from b's perspective: b < a
-        static const Map<s32_t, s32_t> swapPred = {
+        static const Map<s32_t, s32_t> swapPred =
+        {
             {CmpStmt::ICMP_EQ, CmpStmt::ICMP_EQ},
             {CmpStmt::ICMP_NE, CmpStmt::ICMP_NE},
             {CmpStmt::ICMP_SGT, CmpStmt::ICMP_SLT},
@@ -355,7 +358,8 @@ static AD::Interval computeCmpConstraint(s32_t predicate, s64_t succ,
     // If false branch, negate the predicate.
     if (succ == 0)
     {
-        static const Map<s32_t, s32_t> negPred = {
+        static const Map<s32_t, s32_t> negPred =
+        {
             {CmpStmt::ICMP_EQ, CmpStmt::ICMP_NE},
             {CmpStmt::ICMP_NE, CmpStmt::ICMP_EQ},
             {CmpStmt::ICMP_SGT, CmpStmt::ICMP_SLE},
@@ -455,20 +459,23 @@ void AbstractInterpretation::collectBranchRefinement(
         s32_t predicate = cmpStmt->getPredicate();
 
         if (cmpStmt->getOpVarID(0) == IRGraph::NullPtr ||
-            cmpStmt->getOpVarID(1) == IRGraph::NullPtr)
+                cmpStmt->getOpVarID(1) == IRGraph::NullPtr)
         {
             // p == NULL / p != NULL: no interval obj to refine.
         }
         else
         {
             AD::Interval opVal[2] = {getInterval(cmpStmt->getOpVar(0), pred),
-                                     getInterval(cmpStmt->getOpVar(1), pred)};
-            AD::AddressSet opAddr[2] = {
+                                     getInterval(cmpStmt->getOpVar(1), pred)
+                                    };
+            AD::AddressSet opAddr[2] =
+            {
                 getAddressSet(cmpStmt->getOpVar(0), pred),
-                getAddressSet(cmpStmt->getOpVar(1), pred)};
+                getAddressSet(cmpStmt->getOpVar(1), pred)
+            };
 
             if ((opVal[0].isBottom() || opVal[1].isBottom()) &&
-                (!opAddr[0].isBottom() || !opAddr[1].isBottom()))
+                    (!opAddr[0].isBottom() || !opAddr[1].isBottom()))
             {
                 // Pointer-valued cmp: branch feasibility only.
             }
@@ -495,7 +502,7 @@ void AbstractInterpretation::collectBranchRefinement(
                     else
                     {
                         AD::Interval narrowed = computeCmpConstraint(
-                            predicate, succ, i == 0, opVal[i], opVal[other]);
+                                                    predicate, succ, i == 0, opVal[i], opVal[other]);
 
                         if (narrowed.isTop())
                         {
@@ -515,7 +522,7 @@ void AbstractInterpretation::collectBranchRefinement(
                                 for (const AD::Location location : ptrVal)
                                 {
                                     if (const ObjVar* object =
-                                            objectAt(location))
+                                                objectAt(location))
                                         recordBranchRefinement(
                                             object->getId(), narrowed, state,
                                             loadIcfg, succNode);
@@ -663,7 +670,7 @@ bool AbstractInterpretation::handleICFGNode(const ICFGNode* node)
  * visited once, and cycles are handled as whole components.
  */
 void AbstractInterpretation::handleFunction(const ICFGNode* funEntry,
-                                            const CallICFGNode* caller)
+        const CallICFGNode* caller)
 {
     auto it = preAnalysis->getFuncToWTO().find(funEntry->getFun());
     assert(it != preAnalysis->getFuncToWTO().end() &&
@@ -677,7 +684,7 @@ void AbstractInterpretation::handleFunction(const ICFGNode* funEntry,
         const ICFGWTOComp* comp = worklist.pop();
 
         if (const ICFGSingletonWTO* singleton =
-                SVFUtil::dyn_cast<ICFGSingletonWTO>(comp))
+                    SVFUtil::dyn_cast<ICFGSingletonWTO>(comp))
         {
             const ICFGNode* node = singleton->getICFGNode();
             if (mergeStatesFromPredecessors(node))
@@ -783,11 +790,12 @@ void AbstractInterpretation::handleFunCall(const CallICFGNode* callNode)
     {
         const auto& callees = callGraph->getIndCSCallees(callNode);
         std::vector<const FunObjVar*> orderedCallees(callees.begin(),
-                                                     callees.end());
+                callees.end());
         std::sort(orderedCallees.begin(), orderedCallees.end(),
-                  [](const FunObjVar* lhs, const FunObjVar* rhs) {
-                      return lhs->getId() < rhs->getId();
-                  });
+                  [](const FunObjVar* lhs, const FunObjVar* rhs)
+        {
+            return lhs->getId() < rhs->getId();
+        });
         for (const FunObjVar* callee : orderedCallees)
         {
             if (callee->isDeclaration())
@@ -936,7 +944,7 @@ void AbstractInterpretation::updateStateOnSelect(const SelectStmt* select)
     if (condition.isSingleton())
     {
         const SVFVar* selected = condition.isZero() ? select->getFalseValue()
-                                                    : select->getTrueValue();
+                                 : select->getTrueValue();
         interval = getInterval(selected, node);
         addresses = getAddressSet(selected, node);
     }
@@ -1093,7 +1101,8 @@ void AbstractInterpretation::updateStateOnCmp(const CmpStmt* cmp)
         !lhsAddresses.isBottom() || !rhsAddresses.isBottom();
     AD::Interval result =
         AD::Interval::closed(AD::Rational(0), AD::Rational(1));
-    const auto boolean = [](bool value) {
+    const auto boolean = [](bool value)
+    {
         return AD::Interval::singleton(AD::Rational(value ? 1 : 0));
     };
 
@@ -1240,7 +1249,8 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
     const SVFVar* lhsVar = copy->getLHSVar();
     const SVFVar* rhsVar = copy->getRHSVar();
 
-    auto getZExtValue = [&](const SVFVar* var) {
+    auto getZExtValue = [&](const SVFVar* var)
+    {
         const SVFType* type = var->getType();
         if (SVFUtil::isa<SVFIntegerType>(type))
         {
@@ -1254,13 +1264,14 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
             const AD::Rational zero(0);
             const AD::Rational maximum =
                 AD::Rational::fromRaw(mpq_class(modulus - 1));
-            auto fullRange = [&]() {
+            auto fullRange = [&]()
+            {
                 return AD::Interval::closed(zero, maximum);
             };
             if (!value.lower().isFinite() || !value.upper().isFinite() ||
-                value.lower().isStrict() || value.upper().isStrict() ||
-                !value.lower().value().isInteger() ||
-                !value.upper().value().isInteger())
+                    value.lower().isStrict() || value.upper().isStrict() ||
+                    !value.lower().value().isInteger() ||
+                    !value.upper().value().isInteger())
                 return fullRange();
 
             const mpz_class lower =
@@ -1286,18 +1297,19 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
             mpz_fdiv_r(upperResidue.get_mpz_t(), upper.get_mpz_t(),
                        modulus.get_mpz_t());
             return AD::Interval::closed(
-                AD::Rational::fromRaw(mpq_class(lowerResidue)),
-                AD::Rational::fromRaw(mpq_class(upperResidue)));
+                       AD::Rational::fromRaw(mpq_class(lowerResidue)),
+                       AD::Rational::fromRaw(mpq_class(upperResidue)));
         }
         return AD::Interval::top();
     };
 
-    auto getTruncValue = [&](const SVFVar* var, const SVFType* dstType) {
+    auto getTruncValue = [&](const SVFVar* var, const SVFType* dstType)
+    {
         const AD::Interval interval = getInterval(var, node);
         if (interval.isBottom() || !interval.lower().isFinite() ||
-            !interval.upper().isFinite())
+                !interval.upper().isFinite())
             return interval.isBottom() ? interval
-                                       : utils->getRangeLimitFromType(dstType);
+                   : utils->getRangeLimitFromType(dstType);
         s64_t int_lb = interval.lower().value().toInt64();
         s64_t int_ub = interval.upper().value().toInt64();
         u32_t dst_bits = dstType->getByteSize() * 8;
@@ -1384,8 +1396,8 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
         // may denote any address and must conservatively become address Top.
         const AD::AddressSet converted =
             rhsInterval.isZero()
-                ? AD::AddressSet::singleton(AD::Location::null())
-                : AD::AddressSet::top();
+            ? AD::AddressSet::singleton(AD::Location::null())
+            : AD::AddressSet::top();
         updateValue(lhsVar, AD::Interval::bottom(), converted, node);
     }
     else if (copy->getCopyKind() == CopyStmt::PTRTOINT)

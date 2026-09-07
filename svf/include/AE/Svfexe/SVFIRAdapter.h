@@ -73,7 +73,7 @@ private:
     mutable std::map<const ObjVar*, AbstractDomain::Location> locations_;
     mutable std::map<AbstractDomain::Location, const ObjVar*> objects_;
     mutable std::map<const ObjVar*, AbstractDomain::Variable>
-        contentVariables_;
+    contentVariables_;
     mutable std::vector<const ObjVar*> contentObjectsByVariableId_;
     mutable AbstractDomain::MemoryLayout memoryLayout_;
     mutable std::uint64_t nextVariableId_ = 1;

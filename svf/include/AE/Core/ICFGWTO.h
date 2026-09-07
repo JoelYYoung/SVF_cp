@@ -108,9 +108,9 @@ public:
         // the same return successor through multiple outgoing call edges.
         std::sort(successors.begin(), successors.end(),
                   [](const ICFGNode* lhs, const ICFGNode* rhs)
-                  {
-                      return lhs->getId() < rhs->getId();
-                  });
+        {
+            return lhs->getId() < rhs->getId();
+        });
         successors.erase(std::unique(successors.begin(), successors.end()),
                          successors.end());
         return successors;

@@ -63,7 +63,7 @@ Rational::Rational(std::int64_t value)
 {
     mpz_class integer;
     if (mpz_set_str(integer.get_mpz_t(), std::to_string(value).c_str(), 10) !=
-        0)
+            0)
         throw std::invalid_argument("invalid 64-bit rational integer");
     mpq_set_z(value_.get_mpq_t(), integer.get_mpz_t());
 }
@@ -235,7 +235,7 @@ int Bound::compare(const Bound& lhs, const Bound& rhs)
 {
     if (lhs.kind_ != rhs.kind_)
         return static_cast<int>(lhs.kind_) < static_cast<int>(rhs.kind_) ? -1
-                                                                         : 1;
+               : 1;
     if (!lhs.isFinite())
         return 0;
     if (lhs.value_ < rhs.value_)
@@ -260,7 +260,7 @@ Bound Bound::max(const Bound& lhs, const Bound& rhs)
 Bound Bound::add(const Bound& lhs, const Bound& rhs)
 {
     if ((lhs.isMinusInfinity() && rhs.isPlusInfinity()) ||
-        (lhs.isPlusInfinity() && rhs.isMinusInfinity()))
+            (lhs.isPlusInfinity() && rhs.isMinusInfinity()))
         throw std::domain_error("indeterminate sum of opposite infinities");
     if (lhs.isMinusInfinity() || rhs.isMinusInfinity())
         return minusInfinity();
@@ -272,7 +272,7 @@ Bound Bound::add(const Bound& lhs, const Bound& rhs)
 Bound& Bound::assignSum(const Bound& lhs, const Bound& rhs)
 {
     if ((lhs.isMinusInfinity() && rhs.isPlusInfinity()) ||
-        (lhs.isPlusInfinity() && rhs.isMinusInfinity()))
+            (lhs.isPlusInfinity() && rhs.isMinusInfinity()))
         throw std::domain_error("indeterminate sum of opposite infinities");
     if (lhs.isMinusInfinity() || rhs.isMinusInfinity())
     {
@@ -330,7 +330,7 @@ int compareIntervalLower(const Bound& lhs, const Bound& rhs)
 {
     if (lhs.kind() != rhs.kind())
         return static_cast<int>(lhs.kind()) < static_cast<int>(rhs.kind()) ? -1
-                                                                           : 1;
+               : 1;
     if (!lhs.isFinite())
         return 0;
     if (lhs.value() < rhs.value())
@@ -381,7 +381,7 @@ Interval Interval::singleton(const Rational& value)
 Interval Interval::closed(const Rational& lower, const Rational& upper)
 {
     return upper < lower ? bottom()
-                         : Interval(Bound::finite(lower), Bound::finite(upper));
+           : Interval(Bound::finite(lower), Bound::finite(upper));
 }
 
 bool Interval::isTop() const
@@ -506,12 +506,12 @@ std::string Interval::toString() const
     const char right = upper_.isStrict() ? ')' : ']';
     const std::string lower = lower_.isMinusInfinity() ? "-inf"
                               : lower_.isPlusInfinity()
-                                  ? "+inf"
-                                  : lower_.value().toString();
+                              ? "+inf"
+                              : lower_.value().toString();
     const std::string upper = upper_.isPlusInfinity() ? "+inf"
                               : upper_.isMinusInfinity()
-                                  ? "-inf"
-                                  : upper_.value().toString();
+                              ? "-inf"
+                              : upper_.value().toString();
     return std::string(1, left) + lower + ", " + upper + std::string(1, right);
 }
 
@@ -656,7 +656,7 @@ namespace
 {
 
 constexpr std::array<std::uint8_t, 8> RawMagic{'S', 'V', 'F', 'A',
-                                               'D', 'R', 'A', 'W'};
+    'D', 'R', 'A', 'W'};
 constexpr std::uint16_t RawVersion = 2;
 constexpr std::uint32_t MaxCollectionEntries = 1U << 20;
 constexpr std::uint64_t FnvOffset = 14695981039346656037ULL;
@@ -802,7 +802,7 @@ private:
     static std::size_t checkedLimit(const NumericalDomain::RawBuffer& bytes)
     {
         if (bytes.size() <
-            RawMagic.size() + sizeof(std::uint16_t) + 2 + sizeof(std::uint64_t))
+                RawMagic.size() + sizeof(std::uint16_t) + 2 + sizeof(std::uint64_t))
             throw std::invalid_argument("raw state buffer is truncated");
         return bytes.size() - sizeof(std::uint64_t);
     }
@@ -900,7 +900,8 @@ std::uint8_t configurationFlags(const NumericalDomain& state, DomainTag tag)
 {
     switch (tag)
     {
-    case DomainTag::Box: {
+    case DomainTag::Box:
+    {
         const auto& box = static_cast<const BoxDomain&>(state);
         return box.config().integerTightening ? 1U : 0U;
     }
@@ -948,9 +949,10 @@ void writeConstraints(Writer& writer, const LinearConstraintSet& constraints)
 }
 
 LinearConstraintSet canonicalConstraints(const NumericalDomain& state,
-                                         DomainTag)
+        DomainTag)
 {
-    return state.isBottom() ? LinearConstraintSet{} : state.toConstraints();
+    return state.isBottom() ? LinearConstraintSet{} :
+           state.toConstraints();
 }
 
 Rational readRational(Reader& reader)
@@ -1008,19 +1010,20 @@ DomainTag decodeDomainTag(std::uint8_t value)
 }
 
 std::unique_ptr<NumericalDomain> restore(DomainTag tag, std::uint8_t flags,
-                                         bool bottom,
-                                         const LinearConstraintSet& constraints)
+        bool bottom,
+        const LinearConstraintSet& constraints)
 {
     switch (tag)
     {
-    case DomainTag::Box: {
+    case DomainTag::Box:
+    {
         if ((flags & ~1U) != 0)
             throw std::invalid_argument("raw Box state has invalid flags");
         BoxSemanticConfig config;
         config.integerTightening = (flags & 1U) != 0;
         BoxDomain state = bottom
-                              ? BoxDomain::bottom(config)
-                              : BoxDomain::fromConstraints(constraints, config);
+                          ? BoxDomain::bottom(config)
+                          : BoxDomain::fromConstraints(constraints, config);
         return std::make_unique<BoxDomain>(std::move(state));
     }
     }
@@ -1042,8 +1045,8 @@ bool singletonZero(const Interval& value)
 std::optional<Rational> singletonValue(const Interval& value)
 {
     if (!value.lower().isFinite() || !value.upper().isFinite() ||
-        value.lower().isStrict() || value.upper().isStrict() ||
-        value.lower().value() != value.upper().value())
+            value.lower().isStrict() || value.upper().isStrict() ||
+            value.lower().value() != value.upper().value())
         return std::nullopt;
     return value.lower().value();
 }
@@ -1054,14 +1057,14 @@ Interval negateInterval(const Interval& value)
         return bottomInterval();
     const Bound lower =
         value.upper().isFinite()
-            ? Bound::finite(-value.upper().value(), value.upper().isStrict())
+        ? Bound::finite(-value.upper().value(), value.upper().isStrict())
         : value.upper().isPlusInfinity() ? Bound::minusInfinity()
-                                         : Bound::plusInfinity();
+        : Bound::plusInfinity();
     const Bound upper =
         value.lower().isFinite()
-            ? Bound::finite(-value.lower().value(), value.lower().isStrict())
+        ? Bound::finite(-value.lower().value(), value.lower().isStrict())
         : value.lower().isMinusInfinity() ? Bound::plusInfinity()
-                                          : Bound::minusInfinity();
+        : Bound::minusInfinity();
     return Interval(lower, upper);
 }
 
@@ -1115,7 +1118,7 @@ ExtendedRational multiplyExtended(const ExtendedRational& lhs,
     if (lhs.infinity == 0 && rhs.infinity == 0)
         return {0, lhs.value * rhs.value};
     if ((lhs.infinity == 0 && lhs.value.isZero()) ||
-        (rhs.infinity == 0 && rhs.value.isZero()))
+            (rhs.infinity == 0 && rhs.value.isZero()))
         return {0, Rational()};
     const int lhsSign = lhs.infinity != 0 ? lhs.infinity : lhs.value.sign();
     const int rhsSign = rhs.infinity != 0 ? rhs.infinity : rhs.value.sign();
@@ -1141,7 +1144,8 @@ Interval multiplyIntervals(const Interval& lhs, const Interval& rhs)
     const ExtendedRational lhsUpper = extended(lhs.upper());
     const ExtendedRational rhsLower = extended(rhs.lower());
     const ExtendedRational rhsUpper = extended(rhs.upper());
-    const std::array<ExtendedRational, 4> products{
+    const std::array<ExtendedRational, 4> products
+    {
         multiplyExtended(lhsLower, rhsLower),
         multiplyExtended(lhsLower, rhsUpper),
         multiplyExtended(lhsUpper, rhsLower),
@@ -1196,23 +1200,23 @@ Interval divideIntervals(const Interval& lhs, const Interval& rhs,
     {
         reciprocalLower =
             rhs.upper().isPlusInfinity()
-                ? Bound::finite(Rational())
-                : Bound::finite(Rational(1) / rhs.upper().value());
+            ? Bound::finite(Rational())
+            : Bound::finite(Rational(1) / rhs.upper().value());
         reciprocalUpper =
             rhs.lower().value().isZero()
-                ? Bound::plusInfinity()
-                : Bound::finite(Rational(1) / rhs.lower().value());
+            ? Bound::plusInfinity()
+            : Bound::finite(Rational(1) / rhs.lower().value());
     }
     else
     {
         reciprocalLower =
             rhs.upper().isFinite() && rhs.upper().value().isZero()
-                ? Bound::minusInfinity()
-                : Bound::finite(Rational(1) / rhs.upper().value());
+            ? Bound::minusInfinity()
+            : Bound::finite(Rational(1) / rhs.upper().value());
         reciprocalUpper =
             rhs.lower().isMinusInfinity()
-                ? Bound::finite(Rational())
-                : Bound::finite(Rational(1) / rhs.lower().value());
+            ? Bound::finite(Rational())
+            : Bound::finite(Rational(1) / rhs.lower().value());
     }
     Interval result =
         multiplyIntervals(lhs, Interval(reciprocalLower, reciprocalUpper));
@@ -1220,12 +1224,12 @@ Interval divideIntervals(const Interval& lhs, const Interval& rhs,
         return result;
     const Bound lower =
         result.lower().isFinite()
-            ? Bound::finite(truncateTowardZero(result.lower().value()))
-            : result.lower();
+        ? Bound::finite(truncateTowardZero(result.lower().value()))
+        : result.lower();
     const Bound upper =
         result.upper().isFinite()
-            ? Bound::finite(truncateTowardZero(result.upper().value()))
-            : result.upper();
+        ? Bound::finite(truncateTowardZero(result.upper().value()))
+        : result.upper();
     return Interval(lower, upper);
 }
 
@@ -1250,7 +1254,7 @@ struct IEEEFormatBounds
 IEEEFormatBounds ieeeBounds(const FloatFormat& format)
 {
     if (format.exponentBits < 2 || format.exponentBits >= 63 ||
-        format.significandBits < 2)
+            format.significandBits < 2)
         throw std::invalid_argument("invalid IEEE floating format");
     const std::uint64_t bias =
         (std::uint64_t(1) << (format.exponentBits - 1)) - 1;
@@ -1276,7 +1280,8 @@ Rational roundIntegral(const Rational& value, RoundingMode rounding)
         return upper;
     case RoundingMode::TowardNegative:
         return lower;
-    case RoundingMode::NearestTiesToEven: {
+    case RoundingMode::NearestTiesToEven:
+    {
         const Rational lowerDistance = value - lower;
         const Rational upperDistance = upper - value;
         if (lowerDistance < upperDistance)
@@ -1338,21 +1343,21 @@ Interval remainderIntervals(const Interval& lhs, const Interval& rhs)
     if (rhs.lower().isFinite() && rhs.upper().isFinite())
     {
         magnitude = rhs.lower().value().sign() < 0 ? -rhs.lower().value()
-                                                   : rhs.lower().value();
+                    : rhs.lower().value();
         const Rational upperMagnitude = rhs.upper().value().sign() < 0
-                                            ? -rhs.upper().value()
-                                            : rhs.upper().value();
+                                        ? -rhs.upper().value()
+                                        : rhs.upper().value();
         if (*magnitude < upperMagnitude)
             magnitude = upperMagnitude;
     }
     if (lhs.lower().isFinite() && lhs.upper().isFinite())
     {
         Rational lhsMagnitude = lhs.lower().value().sign() < 0
-                                    ? -lhs.lower().value()
-                                    : lhs.lower().value();
+                                ? -lhs.lower().value()
+                                : lhs.lower().value();
         const Rational upperMagnitude = lhs.upper().value().sign() < 0
-                                            ? -lhs.upper().value()
-                                            : lhs.upper().value();
+                                        ? -lhs.upper().value()
+                                        : lhs.upper().value();
         if (lhsMagnitude < upperMagnitude)
             lhsMagnitude = upperMagnitude;
         if (!magnitude || lhsMagnitude < *magnitude)
@@ -1379,8 +1384,8 @@ Interval squareRootInterval(const Interval& operand, const NumericType& type,
     if (!operand.lower().isFinite() || operand.lower().value().sign() < 0)
         return Interval::top();
     const unsigned precision = type.kind == NumericKind::IEEEFloat
-                                   ? type.floatFormat.significandBits
-                                   : 256U;
+                               ? type.floatFormat.significandBits
+                               : 256U;
     MpfrValue input(precision);
     MpfrValue output(precision);
     input.set(operand.lower().value(), MPFR_RNDD);
@@ -1392,8 +1397,8 @@ Interval squareRootInterval(const Interval& operand, const NumericType& type,
     mpfr_sqrt(output.raw(), input.raw(), MPFR_RNDU);
     Interval result(Bound::finite(lower), Bound::finite(output.toRational()));
     return type.kind == NumericKind::IEEEFloat
-               ? roundIEEEInterval(result, type.floatFormat, rounding)
-               : result;
+           ? roundIEEEInterval(result, type.floatFormat, rounding)
+           : result;
 }
 
 Interval castInterval(const Interval& operand, const NumericType& type,
@@ -1427,16 +1432,17 @@ Interval evaluateTree(const NumericalDomain& state,
             throw std::invalid_argument(
                 "tree variable type does not match its stable identity");
         return state.bound(expression.variable());
-    case TreeExpression::Kind::Unary: {
+    case TreeExpression::Kind::Unary:
+    {
         const Interval operand = evaluateTree(state, expression.lhs());
         switch (expression.unaryOperator())
         {
         case UnaryOperator::Negate:
             return expression.type().kind == NumericKind::IEEEFloat
-                       ? roundIEEEInterval(negateInterval(operand),
-                                           expression.type().floatFormat,
-                                           expression.roundingMode())
-                       : negateInterval(operand);
+                   ? roundIEEEInterval(negateInterval(operand),
+                                       expression.type().floatFormat,
+                                       expression.roundingMode())
+                   : negateInterval(operand);
         case UnaryOperator::Cast:
             return castInterval(operand, expression.type(),
                                 expression.roundingMode());
@@ -1445,7 +1451,8 @@ Interval evaluateTree(const NumericalDomain& state,
                                       expression.roundingMode());
         }
     }
-    case TreeExpression::Kind::Binary: {
+    case TreeExpression::Kind::Binary:
+    {
         const Interval lhs = evaluateTree(state, expression.lhs());
         const Interval rhs = evaluateTree(state, expression.rhs());
         Interval result;
@@ -1462,16 +1469,16 @@ Interval evaluateTree(const NumericalDomain& state,
             break;
         case BinaryOperator::Divide:
             result = divideIntervals(
-                lhs, rhs, expression.type().kind == NumericKind::Integer);
+                         lhs, rhs, expression.type().kind == NumericKind::Integer);
             break;
         case BinaryOperator::Remainder:
             result = remainderIntervals(lhs, rhs);
             break;
         }
         return expression.type().kind == NumericKind::IEEEFloat
-                   ? roundIEEEInterval(result, expression.type().floatFormat,
-                                       expression.roundingMode())
-                   : result;
+               ? roundIEEEInterval(result, expression.type().floatFormat,
+                                   expression.roundingMode())
+               : result;
     }
     }
     return Interval::top();
@@ -1559,13 +1566,13 @@ bool decomposeSingleProduct(const TreeExpression& expression,
         return true;
     }
     if (expression.kind() == TreeExpression::Kind::Unary &&
-        expression.unaryOperator() == UnaryOperator::Negate)
+            expression.unaryOperator() == UnaryOperator::Negate)
         return decomposeSingleProduct(expression.lhs(), -scale, result);
     if (expression.kind() != TreeExpression::Kind::Binary)
         return false;
 
     if (expression.binaryOperator() == BinaryOperator::Add ||
-        expression.binaryOperator() == BinaryOperator::Subtract)
+            expression.binaryOperator() == BinaryOperator::Subtract)
     {
         if (!decomposeSingleProduct(expression.lhs(), scale, result))
             return false;
@@ -1679,14 +1686,15 @@ Interval singletonBitwise(const Interval& lhs, const Interval& rhs,
     const std::optional<mpz_class> left = singletonInteger(lhs);
     const std::optional<mpz_class> right = singletonInteger(rhs);
     return left && right ? integerSingleton(operation(*left, *right))
-                         : Interval::top();
+           : Interval::top();
 }
 
 bool intervalsDisjoint(const Interval& lhs, const Interval& rhs)
 {
     if (lhs.isBottom() || rhs.isBottom())
         return true;
-    auto separated = [](const Bound& upper, const Bound& lower) {
+    auto separated = [](const Bound& upper, const Bound& lower)
+    {
         if (!upper.isFinite() || !lower.isFinite())
             return false;
         return upper.value() < lower.value() ||
@@ -1694,7 +1702,7 @@ bool intervalsDisjoint(const Interval& lhs, const Interval& rhs)
                 (upper.isStrict() || lower.isStrict()));
     };
     if (separated(lhs.upper(), rhs.lower()) ||
-        separated(rhs.upper(), lhs.lower()))
+            separated(rhs.upper(), lhs.lower()))
         return true;
     return false;
 }
@@ -1737,14 +1745,16 @@ Interval shiftedRange(const Interval& lhs, const Interval& rhs,
         return Interval::bottom();
     const mpz_class firstShift = std::max(mpz_class(0), shifts->first);
     if (!mpz_fits_ulong_p(firstShift.get_mpz_t()) ||
-        !mpz_fits_ulong_p(shifts->second.get_mpz_t()))
+            !mpz_fits_ulong_p(shifts->second.get_mpz_t()))
         return Interval::top();
     const unsigned long lowShift = firstShift.get_ui();
     const unsigned long highShift = shifts->second.get_ui();
-    std::array<mpz_class, 4> candidates = {
+    std::array<mpz_class, 4> candidates =
+    {
         operation(values->first, lowShift), operation(values->first, highShift),
         operation(values->second, lowShift),
-        operation(values->second, highShift)};
+        operation(values->second, highShift)
+    };
     const auto [minimum, maximum] =
         std::minmax_element(candidates.begin(), candidates.end());
     return closedIntegers(*minimum, *maximum);
@@ -1757,22 +1767,24 @@ Interval bitwiseAnd(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     const Interval exact = singletonBitwise(
-        lhs, rhs, [](const mpz_class& left, const mpz_class& right) {
-            return left & right;
-        });
+                               lhs, rhs, [](const mpz_class& left, const mpz_class& right)
+    {
+        return left & right;
+    });
     if (!exact.isTop())
         return exact;
     const auto nonnegativeUpper = [](const Interval& interval)
-        -> std::optional<mpz_class> {
+                                  -> std::optional<mpz_class>
+    {
         const std::optional<mpz_class> lower =
-            finiteInteger(interval.lower());
+        finiteInteger(interval.lower());
         const std::optional<mpz_class> upper =
-            finiteInteger(interval.upper());
+        finiteInteger(interval.upper());
         if (!lower || !upper || *lower < 0)
-            return std::nullopt;
+        return std::nullopt;
         return upper;
     };
-    const std::optional<mpz_class> lhsUpper = nonnegativeUpper(lhs);
+const std::optional<mpz_class> lhsUpper = nonnegativeUpper(lhs);
     const std::optional<mpz_class> rhsUpper = nonnegativeUpper(rhs);
     // For every nonnegative integer y, x & y is in [0, y], including when x
     // is negative. Either bounded nonnegative operand therefore supplies a
@@ -1791,9 +1803,10 @@ Interval bitwiseOr(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     const Interval exact = singletonBitwise(
-        lhs, rhs, [](const mpz_class& left, const mpz_class& right) {
-            return left | right;
-        });
+                               lhs, rhs, [](const mpz_class& left, const mpz_class& right)
+    {
+        return left | right;
+    });
     return exact.isTop() ? nonnegativeBitwiseRange(lhs, rhs) : exact;
 }
 
@@ -1802,9 +1815,10 @@ Interval bitwiseXor(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     const Interval exact = singletonBitwise(
-        lhs, rhs, [](const mpz_class& left, const mpz_class& right) {
-            return left ^ right;
-        });
+                               lhs, rhs, [](const mpz_class& left, const mpz_class& right)
+    {
+        return left ^ right;
+    });
     return exact.isTop() ? nonnegativeBitwiseRange(lhs, rhs) : exact;
 }
 
@@ -1813,9 +1827,10 @@ Interval shiftLeft(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     return shiftedRange(lhs, rhs,
-                        [](const mpz_class& value, unsigned long shift) {
-                            return value << shift;
-                        });
+                        [](const mpz_class& value, unsigned long shift)
+    {
+        return value << shift;
+    });
 }
 
 Interval shiftRight(const Interval& lhs, const Interval& rhs)
@@ -1823,11 +1838,12 @@ Interval shiftRight(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     return shiftedRange(
-        lhs, rhs, [](const mpz_class& value, unsigned long shift) {
-            mpz_class result;
-            mpz_fdiv_q_2exp(result.get_mpz_t(), value.get_mpz_t(), shift);
-            return result;
-        });
+               lhs, rhs, [](const mpz_class& value, unsigned long shift)
+    {
+        mpz_class result;
+        mpz_fdiv_q_2exp(result.get_mpz_t(), value.get_mpz_t(), shift);
+        return result;
+    });
 }
 
 Interval equalTo(const Interval& lhs, const Interval& rhs)
@@ -1837,7 +1853,7 @@ Interval equalTo(const Interval& lhs, const Interval& rhs)
     if (lhs.isSingleton() && rhs.isSingleton())
         return booleanInterval(lhs.singletonValue() == rhs.singletonValue());
     return intervalsDisjoint(lhs, rhs) ? booleanInterval(false)
-                                       : unknownBoolean();
+           : unknownBoolean();
 }
 
 Interval notEqualTo(const Interval& lhs, const Interval& rhs)
@@ -1853,12 +1869,12 @@ Interval lessThan(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     if (lhs.upper().isFinite() && rhs.lower().isFinite() &&
-        (lhs.upper().value() < rhs.lower().value() ||
-         (lhs.upper().value() == rhs.lower().value() &&
-          (lhs.upper().isStrict() || rhs.lower().isStrict()))))
+            (lhs.upper().value() < rhs.lower().value() ||
+             (lhs.upper().value() == rhs.lower().value() &&
+              (lhs.upper().isStrict() || rhs.lower().isStrict()))))
         return booleanInterval(true);
     if (lhs.lower().isFinite() && rhs.upper().isFinite() &&
-        rhs.upper().value() <= lhs.lower().value())
+            rhs.upper().value() <= lhs.lower().value())
         return booleanInterval(false);
     return unknownBoolean();
 }
@@ -1868,10 +1884,10 @@ Interval lessEqual(const Interval& lhs, const Interval& rhs)
     if (lhs.isBottom() || rhs.isBottom())
         return Interval::bottom();
     if (lhs.upper().isFinite() && rhs.lower().isFinite() &&
-        lhs.upper().value() <= rhs.lower().value())
+            lhs.upper().value() <= rhs.lower().value())
         return booleanInterval(true);
     if (lhs.lower().isFinite() && rhs.upper().isFinite() &&
-        rhs.upper().value() < lhs.lower().value())
+            rhs.upper().value() < lhs.lower().value())
         return booleanInterval(false);
     return unknownBoolean();
 }
@@ -1899,7 +1915,7 @@ void NumericalDomain::assignParallel(const TreeAssignmentList& assignments)
             throw std::invalid_argument(
                 "parallel tree assignment contains a duplicate target");
         if (const std::optional<LinearExpression> linear =
-                assignment.expression.asLinear())
+                    assignment.expression.asLinear())
             affine.push_back({assignment.target, *linear});
         else
             intervalized.emplace_back(
@@ -1941,7 +1957,7 @@ void NumericalDomain::assumeAll(const LinearConstraintSet& constraints)
     std::set<Variable> variables;
     for (const LinearConstraint& constraint : constraints)
         for (const auto& [variable, coefficient] :
-             constraint.expression().terms())
+                constraint.expression().terms())
         {
             (void)coefficient;
             variables.insert(variable);
@@ -2000,7 +2016,7 @@ void NumericalDomain::substituteParallel(const TreeAssignmentList& assignments)
             throw std::invalid_argument(
                 "parallel substitution contains a duplicate target");
         if (const std::optional<LinearExpression> linear =
-                assignment.expression.asLinear())
+                    assignment.expression.asLinear())
             affine.push_back({assignment.target, *linear});
         else
             unsupported.push_back(assignment.target);
@@ -2050,28 +2066,30 @@ LinearConstraintSet NumericalDomain::treeConstraintConsequences(
         return {};
     BilinearDecomposition decomposition;
     if (!decomposeSingleProduct(expression, Rational(1), decomposition) ||
-        !decomposition.hasProduct)
+            !decomposition.hasProduct)
         return {};
     const Interval lhsBounds = bound(decomposition.lhs);
     const Interval rhsBounds = bound(decomposition.rhs);
     if (!lhsBounds.lower().isFinite() || !lhsBounds.upper().isFinite() ||
-        !rhsBounds.lower().isFinite() || !rhsBounds.upper().isFinite())
+            !rhsBounds.lower().isFinite() || !rhsBounds.upper().isFinite())
         return {};
 
     const Rational& lx = lhsBounds.lower().value();
     const Rational& ux = lhsBounds.upper().value();
     const Rational& ly = rhsBounds.lower().value();
     const Rational& uy = rhsBounds.upper().value();
-    std::vector<LinearExpression> productLowerForms{
+    std::vector<LinearExpression> productLowerForms
+    {
         decomposition.rhs * lx + decomposition.lhs * ly -
-            LinearExpression(lx * ly),
+        LinearExpression(lx * ly),
         decomposition.rhs * ux + decomposition.lhs * uy -
-            LinearExpression(ux * uy)};
-    std::vector<LinearExpression> productUpperForms{
+        LinearExpression(ux * uy)};
+    std::vector<LinearExpression> productUpperForms
+    {
         decomposition.rhs * ux + decomposition.lhs * ly -
-            LinearExpression(ux * ly),
+        LinearExpression(ux * ly),
         decomposition.rhs * lx + decomposition.lhs * uy -
-            LinearExpression(lx * uy)};
+        LinearExpression(lx * uy)};
     if (decomposition.factor.sign() < 0)
         std::swap(productLowerForms, productUpperForms);
     std::vector<LinearExpression> lowerForms;
@@ -2086,11 +2104,13 @@ LinearConstraintSet NumericalDomain::treeConstraintConsequences(
                              form * decomposition.factor);
 
     LinearConstraintSet result;
-    const auto appendLower = [&](ConstraintKind kind) {
+    const auto appendLower = [&](ConstraintKind kind)
+    {
         for (const LinearExpression& form : lowerForms)
             result.emplace_back(form, kind);
     };
-    const auto appendUpper = [&](ConstraintKind kind) {
+    const auto appendUpper = [&](ConstraintKind kind)
+    {
         for (const LinearExpression& form : upperForms)
             result.emplace_back(form, kind);
     };
@@ -2131,14 +2151,14 @@ void NumericalDomain::assignInterval(Variable target, const Interval& value)
     }
     if (value.lower().isFinite())
         assume(LinearConstraint(
-            LinearExpression(target) - LinearExpression(value.lower().value()),
-            value.lower().isStrict() ? ConstraintKind::GreaterThan
-                                     : ConstraintKind::GreaterEqual));
+                   LinearExpression(target) - LinearExpression(value.lower().value()),
+                   value.lower().isStrict() ? ConstraintKind::GreaterThan
+                   : ConstraintKind::GreaterEqual));
     if (value.upper().isFinite())
         assume(LinearConstraint(
-            LinearExpression(target) - LinearExpression(value.upper().value()),
-            value.upper().isStrict() ? ConstraintKind::LessThan
-                                     : ConstraintKind::LessEqual));
+                   LinearExpression(target) - LinearExpression(value.upper().value()),
+                   value.upper().isStrict() ? ConstraintKind::LessThan
+                   : ConstraintKind::LessEqual));
 }
 
 void NumericalDomain::recordOperation(OperationKind operation,
@@ -2147,7 +2167,8 @@ void NumericalDomain::recordOperation(OperationKind operation,
 {
     lastOperation_ = {operation, approximation,
                       approximation == ApproximationKind::Exact, best,
-                      std::move(reason)};
+                      std::move(reason)
+                     };
 }
 
 std::uint64_t NumericalDomain::hash() const
@@ -2201,10 +2222,10 @@ Bound scaleBound(const Bound& bound, const Rational& coefficient)
         return Bound::finite(Rational());
     if (bound.isMinusInfinity())
         return coefficient.sign() > 0 ? Bound::minusInfinity()
-                                      : Bound::plusInfinity();
+               : Bound::plusInfinity();
     if (bound.isPlusInfinity())
         return coefficient.sign() > 0 ? Bound::plusInfinity()
-                                      : Bound::minusInfinity();
+               : Bound::minusInfinity();
     return Bound::finite(bound.value() * coefficient, bound.isStrict());
 }
 
@@ -2256,7 +2277,7 @@ Interval evaluate(const BoxDomain& state, const LinearExpression& expression,
         if (excluded && variable == *excluded)
             continue;
         result = addBoxIntervals(
-            result, scaleInterval(state.bound(variable), coefficient));
+                     result, scaleInterval(state.bound(variable), coefficient));
     }
     return result;
 }
@@ -2266,8 +2287,8 @@ Bound integerLower(Bound bound)
     if (!bound.isFinite())
         return bound;
     const Rational value = bound.isStrict()
-                               ? bound.value().floor() + Rational(1)
-                               : bound.value().ceil();
+                           ? bound.value().floor() + Rational(1)
+                           : bound.value().ceil();
     return Bound::finite(value);
 }
 
@@ -2276,7 +2297,7 @@ Bound integerUpper(Bound bound)
     if (!bound.isFinite())
         return bound;
     const Rational value = bound.isStrict() ? bound.value().ceil() - Rational(1)
-                                            : bound.value().floor();
+                           : bound.value().floor();
     return Bound::finite(value);
 }
 
@@ -2286,13 +2307,13 @@ LinearConstraint normalizedLessEqual(const LinearConstraint& constraint,
     strict = constraint.kind() == ConstraintKind::LessThan ||
              constraint.kind() == ConstraintKind::GreaterThan;
     if (constraint.kind() == ConstraintKind::GreaterEqual ||
-        constraint.kind() == ConstraintKind::GreaterThan)
+            constraint.kind() == ConstraintKind::GreaterThan)
         return LinearConstraint(-constraint.expression(),
                                 strict ? ConstraintKind::LessThan
-                                       : ConstraintKind::LessEqual);
+                                : ConstraintKind::LessEqual);
     return LinearConstraint(constraint.expression(),
                             strict ? ConstraintKind::LessThan
-                                   : ConstraintKind::LessEqual);
+                            : ConstraintKind::LessEqual);
 }
 
 } // namespace
@@ -2390,7 +2411,7 @@ void BoxDomain::substituteParallel(const LinearAssignmentList& assignments)
     for (const LinearAssignment& assignment : assignments)
     {
         if (!replacements.emplace(assignment.target, assignment.expression)
-                 .second)
+                .second)
             throw std::invalid_argument(
                 "parallel substitution contains a duplicate target");
     }
@@ -2415,9 +2436,9 @@ void BoxDomain::assume(const LinearConstraint& constraint)
     {
         const Interval value = evaluate(*this, constraint.expression());
         if (!value.lower().isFinite() || !value.upper().isFinite() ||
-            value.lower().value() != Rational() ||
-            value.upper().value() != Rational() || value.lower().isStrict() ||
-            value.upper().isStrict())
+                value.lower().value() != Rational() ||
+                value.upper().value() != Rational() || value.lower().isStrict() ||
+                value.upper().isStrict())
             return;
         makeBottom();
         return;
@@ -2455,8 +2476,8 @@ void BoxDomain::assume(const LinearConstraint& constraint)
             if (coefficient.sign() > 0)
             {
                 next = meetIntervals(
-                    next, Interval(Bound::minusInfinity(),
-                                   Bound::finite(rhs, resultStrict)));
+                           next, Interval(Bound::minusInfinity(),
+                                          Bound::finite(rhs, resultStrict)));
             }
             else
             {
@@ -2499,8 +2520,8 @@ void BoxDomain::assume(const TreeConstraint& constraint)
     assumeAll(consequences);
     report(OperationKind::Assumption, ApproximationKind::SoundOverApproximation,
            consequences.empty()
-               ? "nonlinear or finite IEEE guard had no affine consequence"
-               : "nonlinear guard was reduced to sound affine consequences",
+           ? "nonlinear or finite IEEE guard had no affine consequence"
+           : "nonlinear guard was reduced to sound affine consequences",
            false);
 }
 
@@ -2590,20 +2611,24 @@ CheckResult BoxDomain::entails(const LinearConstraint& constraint) const
     if (bottom_)
         return CheckResult::True;
     const Interval value = evaluate(*this, constraint.expression());
-    const auto upperAtMostZero = [&]() {
+    const auto upperAtMostZero = [&]()
+    {
         if (!value.upper().isFinite())
             return false;
         return value.upper().value().sign() <= 0;
     };
-    const auto upperBelowZero = [&]() {
+    const auto upperBelowZero = [&]()
+    {
         return value.upper().isFinite() &&
                (value.upper().value().sign() < 0 ||
                 (value.upper().value().isZero() && value.upper().isStrict()));
     };
-    const auto lowerAtLeastZero = [&]() {
+    const auto lowerAtLeastZero = [&]()
+    {
         return value.lower().isFinite() && value.lower().value().sign() >= 0;
     };
-    const auto lowerAboveZero = [&]() {
+    const auto lowerAboveZero = [&]()
+    {
         return value.lower().isFinite() &&
                (value.lower().value().sign() > 0 ||
                 (value.lower().value().isZero() && value.lower().isStrict()));
@@ -2621,10 +2646,10 @@ CheckResult BoxDomain::entails(const LinearConstraint& constraint) const
         return lowerAboveZero() ? CheckResult::True : CheckResult::Unknown;
     case ConstraintKind::Equal:
         return upperAtMostZero() && lowerAtLeastZero() ? CheckResult::True
-                                                       : CheckResult::Unknown;
+               : CheckResult::Unknown;
     case ConstraintKind::NotEqual:
         return upperBelowZero() || lowerAboveZero() ? CheckResult::True
-                                                    : CheckResult::Unknown;
+               : CheckResult::Unknown;
     }
     return CheckResult::Unknown;
 }
@@ -2658,18 +2683,18 @@ LinearConstraintSet BoxDomain::toConstraints() const
         if (interval.lower().isFinite())
         {
             result.emplace_back(LinearExpression(variable) -
-                                    LinearExpression(interval.lower().value()),
+                                LinearExpression(interval.lower().value()),
                                 interval.lower().isStrict()
-                                    ? ConstraintKind::GreaterThan
-                                    : ConstraintKind::GreaterEqual);
+                                ? ConstraintKind::GreaterThan
+                                : ConstraintKind::GreaterEqual);
         }
         if (interval.upper().isFinite())
         {
             result.emplace_back(LinearExpression(variable) -
-                                    LinearExpression(interval.upper().value()),
+                                LinearExpression(interval.upper().value()),
                                 interval.upper().isStrict()
-                                    ? ConstraintKind::LessThan
-                                    : ConstraintKind::LessEqual);
+                                ? ConstraintKind::LessThan
+                                : ConstraintKind::LessEqual);
         }
     }
     return result;
@@ -2685,11 +2710,11 @@ void BoxDomain::close()
     {
         const Interval& interval = boundAt(variable);
         const Bound lower = interval.lower().isFinite()
-                                ? Bound::finite(interval.lower().value())
-                                : interval.lower();
+                            ? Bound::finite(interval.lower().value())
+                            : interval.lower();
         const Bound upper = interval.upper().isFinite()
-                                ? Bound::finite(interval.upper().value())
-                                : interval.upper();
+                            ? Bound::finite(interval.upper().value())
+                            : interval.upper();
         setBound(variable, Interval(lower, upper));
     }
 }
@@ -2755,7 +2780,7 @@ BoxDomain BoxDomain::widen(const BoxDomain& next,
                 for (const Rational& threshold : policy.thresholds)
                 {
                     if (threshold <= following.lower().value() &&
-                        (lower.isMinusInfinity() || lower.value() < threshold))
+                            (lower.isMinusInfinity() || lower.value() < threshold))
                         lower = Bound::finite(threshold);
                 }
             }
@@ -2768,7 +2793,7 @@ BoxDomain BoxDomain::widen(const BoxDomain& next,
                 for (const Rational& threshold : policy.thresholds)
                 {
                     if (following.upper().value() <= threshold &&
-                        (upper.isPlusInfinity() || threshold < upper.value()))
+                            (upper.isPlusInfinity() || threshold < upper.value()))
                         upper = Bound::finite(threshold);
                 }
             }
@@ -2778,7 +2803,7 @@ BoxDomain BoxDomain::widen(const BoxDomain& next,
     for (const LinearConstraint& threshold : policy.linearThresholds)
     {
         if (entails(threshold) == CheckResult::True &&
-            next.entails(threshold) == CheckResult::True)
+                next.entails(threshold) == CheckResult::True)
             result.assume(threshold);
     }
     result.recordOperation(OperationKind::Widening,
@@ -2815,8 +2840,8 @@ BoxDomain BoxDomain::narrow(const BoxDomain& next) const
 bool BoxDomain::hasCompatibleDomain(const AbstractDomain& other) const
 {
     const auto* box = other.isDomain<BoxDomain>()
-                          ? &static_cast<const BoxDomain&>(other)
-                          : nullptr;
+                      ? &static_cast<const BoxDomain&>(other)
+                      : nullptr;
     return box && config_.operationCompatible(box->config_);
 }
 
@@ -2838,10 +2863,10 @@ void BoxDomain::joinDomain(const AbstractDomain& other)
     for (const BoundPageEntry& entry : boundPages_)
     {
         while (otherPage != box.boundPages_.end() &&
-               otherPage->index < entry.index)
+                otherPage->index < entry.index)
             ++otherPage;
         if (otherPage == box.boundPages_.end() ||
-            otherPage->index != entry.index)
+                otherPage->index != entry.index)
         {
             // Missing slots denote Top, so this entire page joins to Top.
             continue;
@@ -2923,8 +2948,8 @@ bool BoxDomain::leqDomain(const AbstractDomain& other) const
         for (std::size_t index = 0; index < boundPages_.size(); ++index)
         {
             if (boundPages_[index].index != box.boundPages_[index].index ||
-                (boundPages_[index].page != box.boundPages_[index].page &&
-                 boundPages_[index].page->bounds !=
+                    (boundPages_[index].page != box.boundPages_[index].page &&
+                     boundPages_[index].page->bounds !=
                      box.boundPages_[index].page->bounds))
             {
                 equal = false;
@@ -2976,7 +3001,7 @@ void BoxDomain::canonicalize(Variable variable)
         return;
     Interval interval = boundAt(variable);
     if (config_.integerTightening &&
-        variable.type().kind == NumericKind::Integer)
+            variable.type().kind == NumericKind::Integer)
     {
         interval = Interval(integerLower(interval.lower()),
                             integerUpper(interval.upper()));
@@ -2990,7 +3015,7 @@ void BoxDomain::canonicalize(Variable variable)
         eraseBound(variable);
     else
         writablePage(variable.id() / BoundsPerPage)
-            .bounds[variable.id() % BoundsPerPage] =
+        .bounds[variable.id() % BoundsPerPage] =
             BoundSlot{variable, std::move(interval)};
 }
 
@@ -3003,7 +3028,7 @@ void BoxDomain::setBound(Variable variable, Interval interval)
         eraseBound(variable);
     else
         writablePage(variable.id() / BoundsPerPage)
-            .bounds[variable.id() % BoundsPerPage] =
+        .bounds[variable.id() % BoundsPerPage] =
             BoundSlot{variable, std::move(interval)};
     canonicalize(variable);
 }
@@ -3014,9 +3039,10 @@ const Interval& BoxDomain::boundAt(Variable variable) const
     const std::size_t pageIndex = variable.id() / BoundsPerPage;
     const auto iterator =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
-                         [](const BoundPageEntry& entry, std::size_t index) {
-                             return entry.index < index;
-                         });
+                         [](const BoundPageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (iterator == boundPages_.end() || iterator->index != pageIndex)
         return top;
     const auto& slot = iterator->page->bounds[variable.id() % BoundsPerPage];
@@ -3032,12 +3058,13 @@ BoxDomain::BoundPage& BoxDomain::writablePage(std::size_t pageIndex)
 {
     auto iterator =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
-                         [](const BoundPageEntry& entry, std::size_t index) {
-                             return entry.index < index;
-                         });
+                         [](const BoundPageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (iterator == boundPages_.end() || iterator->index != pageIndex)
         iterator = boundPages_.insert(
-            iterator, {pageIndex, std::make_shared<BoundPage>()});
+                       iterator, {pageIndex, std::make_shared<BoundPage>()});
     else if (iterator->page.use_count() != 1)
         iterator->page = std::make_shared<BoundPage>(*iterator->page);
     return *iterator->page;
@@ -3048,9 +3075,10 @@ void BoxDomain::eraseBound(Variable variable)
     const std::size_t pageIndex = variable.id() / BoundsPerPage;
     auto existing =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
-                         [](const BoundPageEntry& entry, std::size_t index) {
-                             return entry.index < index;
-                         });
+                         [](const BoundPageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (existing == boundPages_.end() || existing->index != pageIndex)
         return;
     const std::size_t offset = variable.id() % BoundsPerPage;
@@ -3061,9 +3089,10 @@ void BoxDomain::eraseBound(Variable variable)
             "Variable ID was reused with a different numeric type");
     auto iterator =
         std::lower_bound(boundPages_.begin(), boundPages_.end(), pageIndex,
-                         [](const BoundPageEntry& entry, std::size_t index) {
-                             return entry.index < index;
-                         });
+                         [](const BoundPageEntry& entry, std::size_t index)
+    {
+        return entry.index < index;
+    });
     if (iterator->page.use_count() != 1)
         iterator->page = std::make_shared<BoundPage>(*iterator->page);
     iterator->page->bounds[offset].reset();
@@ -3074,7 +3103,10 @@ void BoxDomain::eraseBound(Variable variable)
 bool BoxDomain::pageIsEmpty(const BoundPage& page)
 {
     return std::none_of(page.bounds.begin(), page.bounds.end(),
-                        [](const auto& bound) { return bound.has_value(); });
+                        [](const auto& bound)
+    {
+        return bound.has_value();
+    });
 }
 
 std::vector<Variable> BoxDomain::boundedVariables() const
@@ -3122,7 +3154,7 @@ void BoxDomain::report(OperationKind operation, ApproximationKind approximation,
     recordOperation(operation, approximation, best, reason);
     if (config_.diagnostics)
         config_.diagnostics->report(
-            {operation, approximation, std::move(reason)});
+    {operation, approximation, std::move(reason)});
 }
 
 } // namespace SVF::AbstractDomain

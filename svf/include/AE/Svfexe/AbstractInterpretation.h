@@ -143,17 +143,17 @@ public:
     /// All three overloads are virtual so full-sparse can route ObjVar
     /// reads through the SVFG.
     virtual AbstractDomain::Interval getInterval(const ValVar* var,
-                                                 const ICFGNode* node);
+            const ICFGNode* node);
     virtual AbstractDomain::Interval getInterval(const ObjVar* var,
-                                                 const ICFGNode* node);
+            const ICFGNode* node);
     virtual AbstractDomain::Interval getInterval(const SVFVar* var,
-                                                 const ICFGNode* node);
+            const ICFGNode* node);
     virtual AbstractDomain::AddressSet getAddressSet(const ValVar* var,
-                                                     const ICFGNode* node);
+            const ICFGNode* node);
     virtual AbstractDomain::AddressSet getAddressSet(const ObjVar* var,
-                                                     const ICFGNode* node);
+            const ICFGNode* node);
     virtual AbstractDomain::AddressSet getAddressSet(const SVFVar* var,
-                                                     const ICFGNode* node);
+            const ICFGNode* node);
 
     /// Side-effect-free check that the node state is reachable and the value
     /// belongs to the typed analysis vocabulary. A supported but unconstrained
@@ -212,7 +212,7 @@ public:
     /// implementation separates ValVars from ICFG memory states. Other
     /// implementations return nullptr.
     virtual const AbstractDomain::AbstractDomain* getScalarAbstractState()
-        const;
+    const;
 
     virtual bool hasAbsState(const ICFGNode* node) const;
 
@@ -390,7 +390,7 @@ protected:
     const FunObjVar* getCallee(const CallICFGNode* callNode);
 
     Set<const ICFGNode*>
-        allAnalyzedNodes; // All nodes ever analyzed (across all entry points)
+    allAnalyzedNodes; // All nodes ever analyzed (across all entry points)
 
     std::vector<std::unique_ptr<AEDetector>> detectors;
     AbsExtAPI* utils;

@@ -92,28 +92,30 @@ void AbsExtAPI::initExtFunMap()
     SSE_FUNC_PROCESS(cosh, cosh);
     SSE_FUNC_PROCESS(tanh, tanh);
 
-    auto sse_svf_assert = [this](const CallICFGNode* callNode) {
+    auto sse_svf_assert = [this](const CallICFGNode* callNode)
+    {
         checkpoints.erase(callNode);
         const AD::Interval arg0Val =
             ae->getInterval(callNode->getArgument(0), callNode);
         if (arg0Val == integerInterval(1))
         {
             SVFUtil::errs() << SVFUtil::sucMsg(
-                "The assertion is successfully verified!!\n");
+                                "The assertion is successfully verified!!\n");
         }
         else
         {
             SVFUtil::errs()
-                << SVFUtil::errMsg("Assertion failure, this svf_assert cannot "
-                                   "be verified!!\n")
-                << callNode->toString() << "\n";
+                    << SVFUtil::errMsg("Assertion failure, this svf_assert cannot "
+                               "be verified!!\n")
+                    << callNode->toString() << "\n";
             assert(false);
         }
         return;
     };
     func_map["svf_assert"] = sse_svf_assert;
 
-    auto svf_assert_eq = [this](const CallICFGNode* callNode) {
+    auto svf_assert_eq = [this](const CallICFGNode* callNode)
+    {
         const AD::Interval arg0Val =
             ae->getInterval(callNode->getArgument(0), callNode);
         const AD::Interval arg1Val =
@@ -121,19 +123,20 @@ void AbsExtAPI::initExtFunMap()
         if (arg0Val == arg1Val)
         {
             SVFUtil::errs() << SVFUtil::sucMsg(
-                "The assertion is successfully verified!!\n");
+                                "The assertion is successfully verified!!\n");
         }
         else
         {
             SVFUtil::errs()
-                << "svf_assert_eq Fail. " << callNode->toString() << "\n";
+                    << "svf_assert_eq Fail. " << callNode->toString() << "\n";
             assert(false);
         }
         return;
     };
     func_map["svf_assert_eq"] = svf_assert_eq;
 
-    auto svf_print = [&](const CallICFGNode* callNode) {
+    auto svf_print = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 2)
             return;
         std::string text = strRead(callNode->getArgument(1), callNode);
@@ -146,7 +149,8 @@ void AbsExtAPI::initExtFunMap()
     };
     func_map["svf_print"] = svf_print;
 
-    auto svf_set_value = [&](const CallICFGNode* callNode) {
+    auto svf_set_value = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 2)
             return;
         const AD::Interval lbVal =
@@ -177,7 +181,8 @@ void AbsExtAPI::initExtFunMap()
     };
     func_map["set_value"] = svf_set_value;
 
-    auto sse_fread = [&](const CallICFGNode* callNode) {
+    auto sse_fread = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 3)
             return;
         AD::Interval block_count =
@@ -189,11 +194,13 @@ void AbsExtAPI::initExtFunMap()
     };
     func_map["fread"] = sse_fread;
 
-    auto sse_sprintf = [&](const CallICFGNode* callNode) {
+    auto sse_sprintf = [&](const CallICFGNode* callNode)
+    {
         // printf is difficult to predict since it has no byte size arguments
     };
 
-    auto sse_snprintf = [&](const CallICFGNode* callNode) {
+    auto sse_snprintf = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 2)
             return;
         // get elem size of arg2
@@ -202,8 +209,8 @@ void AbsExtAPI::initExtFunMap()
         {
             elemSize = SVFUtil::dyn_cast<SVFArrayType>(
                            callNode->getArgument(2)->getType())
-                           ->getTypeOfElement()
-                           ->getByteSize();
+                       ->getTypeOfElement()
+                       ->getByteSize();
         }
         else if (callNode->getArgument(2)->getType()->isPointerTy())
         {
@@ -214,9 +221,9 @@ void AbsExtAPI::initExtFunMap()
             return;
         }
         AD::Interval size = AD::subtract(
-            AD::multiply(ae->getInterval(callNode->getArgument(1), callNode),
-                         integerInterval(elemSize)),
-            integerInterval(1));
+                                AD::multiply(ae->getInterval(callNode->getArgument(1), callNode),
+                                             integerInterval(elemSize)),
+                                integerInterval(1));
         (void)size;
     };
     func_map["__snprintf_chk"] = sse_snprintf;
@@ -230,7 +237,8 @@ void AbsExtAPI::initExtFunMap()
     func_map["swprintf"] = sse_snprintf;
     func_map["_snwprintf"] = sse_snprintf;
 
-    auto sse_itoa = [&](const CallICFGNode* callNode) {
+    auto sse_itoa = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 3)
             return;
         const AD::Interval value =
@@ -243,7 +251,8 @@ void AbsExtAPI::initExtFunMap()
     };
     func_map["itoa"] = sse_itoa;
 
-    auto sse_strlen = [&](const CallICFGNode* callNode) {
+    auto sse_strlen = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 1)
             return;
         const SVFVar* retVar = callNode->getRetICFGNode()->getActualRet();
@@ -261,7 +270,8 @@ void AbsExtAPI::initExtFunMap()
     func_map["strlen"] = sse_strlen;
     func_map["wcslen"] = sse_strlen;
 
-    auto sse_recv = [&](const CallICFGNode* callNode) {
+    auto sse_recv = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 4)
             return;
         AD::Interval len =
@@ -273,7 +283,8 @@ void AbsExtAPI::initExtFunMap()
     func_map["recv"] = sse_recv;
     func_map["__recv"] = sse_recv;
 
-    auto sse_free = [&](const CallICFGNode* callNode) {
+    auto sse_free = [&](const CallICFGNode* callNode)
+    {
         if (callNode->arg_size() < 1)
             return;
         const AD::AddressSet ptrVal =
@@ -287,14 +298,16 @@ void AbsExtAPI::initExtFunMap()
         }
     };
     // Add all free-related functions to func_map
-    std::vector<std::string> freeFunctions = {
+    std::vector<std::string> freeFunctions =
+    {
         "VOS_MemFree",       "cfree",        "free",
         "free_all_mem",      "freeaddrinfo", "gcry_mpi_release",
         "gcry_sexp_release", "globfree",     "nhfree",
         "obstack_free",      "safe_cfree",   "safe_free",
         "safefree",          "safexfree",    "sm_free",
         "vim_free",          "xfree",        "SSL_CTX_free",
-        "SSL_free",          "XFree"};
+        "SSL_free",          "XFree"
+    };
 
     for (const auto& name : freeFunctions)
     {
@@ -307,11 +320,12 @@ void AbsExtAPI::collectCheckPoint()
     // traverse every ICFGNode
     Set<std::string> ae_checkpoint_names = {"svf_assert"};
     Set<std::string> buf_checkpoint_names = {"UNSAFE_BUFACCESS",
-                                             "SAFE_BUFACCESS"};
+                                             "SAFE_BUFACCESS"
+                                            };
     Set<std::string> nullptr_checkpoint_names = {"UNSAFE_LOAD", "SAFE_LOAD"};
 
     for (auto it = svfir->getICFG()->begin(); it != svfir->getICFG()->end();
-         ++it)
+            ++it)
     {
         const ICFGNode* node = it->second;
         if (const CallICFGNode* call = SVFUtil::dyn_cast<CallICFGNode>(node))
@@ -319,14 +333,14 @@ void AbsExtAPI::collectCheckPoint()
             if (const FunObjVar* fun = call->getCalledFunction())
             {
                 if (ae_checkpoint_names.find(fun->getName()) !=
-                    ae_checkpoint_names.end())
+                        ae_checkpoint_names.end())
                 {
                     checkpoints.insert(call);
                 }
                 if (Options::BufferOverflowCheck())
                 {
                     if (buf_checkpoint_names.find(fun->getName()) !=
-                        buf_checkpoint_names.end())
+                            buf_checkpoint_names.end())
                     {
                         checkpoints.insert(call);
                     }
@@ -334,7 +348,7 @@ void AbsExtAPI::collectCheckPoint()
                 if (Options::NullDerefCheck())
                 {
                     if (nullptr_checkpoint_names.find(fun->getName()) !=
-                        nullptr_checkpoint_names.end())
+                            nullptr_checkpoint_names.end())
                     {
                         checkpoints.insert(call);
                     }
@@ -353,7 +367,7 @@ void AbsExtAPI::checkPointAllSet()
     else
     {
         SVFUtil::errs() << SVFUtil::errMsg(
-                               "At least one svf_assert has not been checked!!")
+                            "At least one svf_assert has not been checked!!")
                         << "\n";
         for (const CallICFGNode* call : checkpoints)
             SVFUtil::errs() << call->toString() + "\n";
@@ -396,7 +410,7 @@ void AbsExtAPI::handleExtAPI(const CallICFGNode* call)
     ExtAPIType extType = UNCLASSIFIED;
     // get type of mem api
     for (const std::string& annotation :
-         ExtAPI::getExtAPI()->getExtFuncAnnotations(fun))
+            ExtAPI::getExtAPI()->getExtFuncAnnotations(fun))
     {
         if (annotation.find("MEMCPY") != std::string::npos)
             extType = MEMCPY;
@@ -469,8 +483,8 @@ u32_t AbsExtAPI::getElementSize(const ValVar* var)
     if (var->getType()->isArrayTy())
     {
         return SVFUtil::dyn_cast<SVFArrayType>(var->getType())
-            ->getTypeOfElement()
-            ->getByteSize();
+               ->getTypeOfElement()
+               ->getByteSize();
     }
     if (var->getType()->isPointerTy())
         return 1;
@@ -518,10 +532,10 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
                 for (const SVFStmt* stmt2 : icfgNode->getSVFStmts())
                 {
                     if (const AddrStmt* addrStmt =
-                            SVFUtil::dyn_cast<AddrStmt>(stmt2))
+                                SVFUtil::dyn_cast<AddrStmt>(stmt2))
                     {
                         dst_size = std::max(
-                            dst_size, ae->getAllocaInstByteSize(addrStmt));
+                                       dst_size, ae->getAllocaInstByteSize(addrStmt));
                     }
                 }
             }
@@ -539,7 +553,7 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
                 ae->getGepObjAddrs(strValue, integerInterval(index), node);
             if (expression.isTop())
                 return AD::Interval::closed(
-                    AD::Rational(0), AD::Rational(Options::MaxFieldLimit()));
+                           AD::Rational(0), AD::Rational(Options::MaxFieldLimit()));
             AD::Interval value = AD::Interval::bottom();
             for (AD::Location location : expression)
             {
@@ -547,7 +561,7 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
             }
             if (!value.isSingleton())
                 return AD::Interval::closed(
-                    AD::Rational(0), AD::Rational(Options::MaxFieldLimit()));
+                           AD::Rational(0), AD::Rational(Options::MaxFieldLimit()));
             if (value.isZero())
             {
                 const u32_t elemSize = getElementSize(strValue);
@@ -619,7 +633,7 @@ void AbsExtAPI::handleMemcpy(const ValVar* dst, const ValVar* src,
     u32_t range_val = size / elemSize;
 
     if (ae->getAddressSet(src, node).isBottom() ||
-        ae->getAddressSet(dst, node).isBottom())
+            ae->getAddressSet(dst, node).isBottom())
         return;
 
     for (u32_t index = 0; index < range_val; index++)
@@ -658,8 +672,8 @@ void AbsExtAPI::handleMemset(const ValVar* dst, const AD::Interval& elem,
     if (dst->getType()->isArrayTy())
     {
         elemSize = SVFUtil::dyn_cast<SVFArrayType>(dst->getType())
-                       ->getTypeOfElement()
-                       ->getByteSize();
+                   ->getTypeOfElement()
+                   ->getByteSize();
     }
     else if (dst->getType()->isPointerTy())
     {

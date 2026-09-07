@@ -117,8 +117,8 @@ void LifetimeDomain::release(Location location)
 {
     const Lifetime current = statusOf(location);
     set(location, current == Lifetime::Alive || current == Lifetime::Freed
-                      ? Lifetime::Freed
-                      : Lifetime::MaybeFreed);
+        ? Lifetime::Freed
+        : Lifetime::MaybeFreed);
 }
 
 bool LifetimeDomain::mayBeFreed(Location location) const
@@ -211,16 +211,17 @@ bool LifetimeDomain::leqDomain(const AbstractDomain& other) const
 {
     const auto& state = static_cast<const LifetimeDomain&>(other);
     if (defaultValue_ == state.defaultValue_ &&
-        (values_ == state.values_ || *values_ == *state.values_))
+            (values_ == state.values_ || *values_ == *state.values_))
         return true;
     if (!lifetimeIsSubsetOf(defaultValue_, state.defaultValue_))
         return false;
     const std::set<Location> locations = combinedKeys(*values_, *state.values_);
     return std::all_of(locations.begin(), locations.end(),
-                       [&](Location location) {
-                           return lifetimeIsSubsetOf(
-                               statusOf(location), state.statusOf(location));
-                       });
+                       [&](Location location)
+    {
+        return lifetimeIsSubsetOf(
+                   statusOf(location), state.statusOf(location));
+    });
 }
 
 std::string LifetimeDomain::domainToString() const

@@ -85,53 +85,53 @@ Interval integerInterval(std::int64_t value)
 void testScalarTransferOperations()
 {
     require(Rational::fromDouble(0.0) == Rational(0) &&
-                Rational::fromDouble(0.5) == Rational(Integer(1), Integer(2)),
+            Rational::fromDouble(0.5) == Rational(Integer(1), Integer(2)),
             "native floating-to-rational conversion was not exact");
     const Interval two = integerInterval(2);
     const Interval four = integerInterval(4);
     require(add(two, four) == integerInterval(6) &&
-                subtract(four, two) == two &&
-                multiply(two, four) == integerInterval(8) &&
-                divide(four, two) == two &&
-                remainder(integerInterval(5), two) == integerInterval(1),
+            subtract(four, two) == two &&
+            multiply(two, four) == integerInterval(8) &&
+            divide(four, two) == two &&
+            remainder(integerInterval(5), two) == integerInterval(1),
             "native scalar arithmetic produced an incorrect singleton");
 
     require(bitwiseAnd(integerInterval(6), integerInterval(3)) ==
-                    integerInterval(2) &&
-                bitwiseOr(integerInterval(4), integerInterval(1)) ==
-                    integerInterval(5) &&
-                bitwiseXor(integerInterval(7), integerInterval(3)) ==
-                    integerInterval(4) &&
-                shiftLeft(two, integerInterval(3)) == integerInterval(16) &&
-                shiftRight(integerInterval(15), two) == integerInterval(3),
+            integerInterval(2) &&
+            bitwiseOr(integerInterval(4), integerInterval(1)) ==
+            integerInterval(5) &&
+            bitwiseXor(integerInterval(7), integerInterval(3)) ==
+            integerInterval(4) &&
+            shiftLeft(two, integerInterval(3)) == integerInterval(16) &&
+            shiftRight(integerInterval(15), two) == integerInterval(3),
             "native bitwise or shift transfer produced an incorrect result");
     require(
         hasBounds(shiftLeft(Interval::closed(Rational(1), Rational(3)),
                             Interval::closed(Rational(1), Rational(2))),
                   Rational(2), Rational(12)) &&
-            hasBounds(shiftRight(Interval::closed(Rational(-17), Rational(15)),
-                                 Interval::closed(Rational(1), Rational(2))),
-                      Rational(-9), Rational(7)) &&
-            hasBounds(bitwiseOr(Interval::closed(Rational(1), Rational(3)),
-                                Interval::closed(Rational(4), Rational(4))),
-                      Rational(0), Rational(7)) &&
-            hasBounds(bitwiseAnd(Interval::top(),
-                                 Interval::closed(Rational(0), Rational(31))),
-                      Rational(0), Rational(31)) &&
-            hasBounds(bitwiseAnd(
-                          Interval::closed(Rational(-8), Rational(8)),
-                          Interval::closed(Rational(0), Rational(15))),
-                      Rational(0), Rational(15)),
+        hasBounds(shiftRight(Interval::closed(Rational(-17), Rational(15)),
+                             Interval::closed(Rational(1), Rational(2))),
+                  Rational(-9), Rational(7)) &&
+        hasBounds(bitwiseOr(Interval::closed(Rational(1), Rational(3)),
+                            Interval::closed(Rational(4), Rational(4))),
+                  Rational(0), Rational(7)) &&
+        hasBounds(bitwiseAnd(Interval::top(),
+                             Interval::closed(Rational(0), Rational(31))),
+                  Rational(0), Rational(31)) &&
+        hasBounds(bitwiseAnd(
+                      Interval::closed(Rational(-8), Rational(8)),
+                      Interval::closed(Rational(0), Rational(15))),
+                  Rational(0), Rational(15)),
         "native range bitwise or shift transfer was not sound");
 
     const Interval low = Interval::closed(Rational(0), Rational(3));
     const Interval high = Interval::closed(Rational(5), Rational(8));
     require(equalTo(two, two) == integerInterval(1) &&
-                notEqualTo(low, high) == integerInterval(1) &&
-                lessThan(low, high) == integerInterval(1) &&
-                greaterEqual(high, low) == integerInterval(1) &&
-                equalTo(low, Interval::closed(Rational(2), Rational(6))) ==
-                    Interval::closed(Rational(0), Rational(1)),
+            notEqualTo(low, high) == integerInterval(1) &&
+            lessThan(low, high) == integerInterval(1) &&
+            greaterEqual(high, low) == integerInterval(1) &&
+            equalTo(low, Interval::closed(Rational(2), Rational(6))) ==
+            Interval::closed(Rational(0), Rational(1)),
             "native comparison transfer lost definite or unknown outcomes");
 
     const Interval closedZeroOne = Interval::closed(Rational(0), Rational(1));
@@ -142,12 +142,12 @@ void testScalarTransferOperations()
     Interval met = closedZeroOne;
     met.meetWith(openZeroOne);
     require(openZeroOne.isSubsetOf(closedZeroOne) && joined == closedZeroOne &&
-                met == openZeroOne,
+            met == openZeroOne,
             "native interval lattice mishandled a strict lower bound");
     require(lessThan(Interval(Bound::finite(Rational(0)),
                               Bound::finite(Rational(1), true)),
                      Interval::closed(Rational(1), Rational(2))) ==
-                integerInterval(1),
+            integerInterval(1),
             "native interval comparison ignored a strict endpoint");
 }
 
@@ -169,20 +169,20 @@ void testLatticeAndTransferSurface()
         greaterThan(LinearExpression(z), LinearExpression(Rational("1/2"))));
     state.assign(y, LinearExpression(x) + LinearExpression(Rational(2)));
     require(hasBounds(state.bound(x), Rational(0), Rational(10)) &&
-                hasBounds(state.bound(y), Rational(2), Rational(12)),
+            hasBounds(state.bound(y), Rational(2), Rational(12)),
             "Box assumptions and affine assignment lost interval bounds");
     require(hasBounds(state.bound(LinearExpression(x) + LinearExpression(y)),
                       Rational(2), Rational(22)),
             "Box expression bounds did not use all terms");
     require(state.bound(z).lower().isStrict() &&
-                state.bound(z).lower().value() == Rational("1/2"),
+            state.bound(z).lower().value() == Rational("1/2"),
             "Box applied integer tightening to a typed real variable");
 
     BoxDomain simultaneous = state;
     simultaneous.assignParallel(
-        {{x, LinearExpression(y)}, {y, LinearExpression(x)}});
+    {{x, LinearExpression(y)}, {y, LinearExpression(x)}});
     require(hasBounds(simultaneous.bound(x), Rational(2), Rational(12)) &&
-                hasBounds(simultaneous.bound(y), Rational(0), Rational(10)),
+            hasBounds(simultaneous.bound(y), Rational(0), Rational(10)),
             "Box parallel assignment was not simultaneous");
 
     BoxDomain post = BoxDomain::top();
@@ -198,17 +198,17 @@ void testLatticeAndTransferSurface()
     const BoxDomain joined = state.join(alternative);
     const BoxDomain met = state.meet(alternative);
     require(hasBounds(joined.bound(x), Rational(0), Rational(20)) &&
-                hasBounds(met.bound(x), Rational(5), Rational(10)),
+            hasBounds(met.bound(x), Rational(5), Rational(10)),
             "Box join/meet did not compute interval hull/intersection");
     require(state.isSubsetOf(joined) == CheckResult::True &&
-                met.isSubsetOf(state) == CheckResult::True,
+            met.isSubsetOf(state) == CheckResult::True,
             "Box lattice ordering disagrees with join/meet");
 
     const BoxDomain widened = state.widen(alternative);
     require(widened.bound(x).upper().isPlusInfinity(),
             "Box widening did not extrapolate an unstable upper bound");
     require(widened.narrow(alternative).bound(x).upper().value() ==
-                Rational(20),
+            Rational(20),
             "Box narrowing did not recover the finite successor bound");
 
     BoxDomain contradiction = BoxDomain::top();
@@ -234,12 +234,12 @@ void testStableVocabularyExpandFoldAndTrees()
     state.assume(atLeast(copy, Rational(2)));
     state.fold(x, {copy});
     require(state.bound(copy).isTop() &&
-                hasBounds(state.bound(x), Rational(1), Rational(3)),
+            hasBounds(state.bound(x), Rational(1), Rational(3)),
             "Box fold did not merge and forget the folded variable");
 
     BoxDomain unknown = BoxDomain::top();
     require(state.join(unknown).isTop() &&
-                state.meet(unknown).isEquivalentTo(state) == CheckResult::True,
+            state.meet(unknown).isEquivalentTo(state) == CheckResult::True,
             "Box did not interpret a missing stable variable as Top");
 
     const Variable realX(x.id(), NumericType::real());
@@ -273,8 +273,8 @@ void testPagedCopyOnWriteAndSerialization()
     BoxDomain copy = original;
     copy.assign(first, LinearExpression(Rational(7)));
     require(hasBounds(original.bound(first), Rational(1), Rational(3)) &&
-                hasBounds(copy.bound(first), Rational(7), Rational(7)) &&
-                hasBounds(copy.bound(distant), Rational(9), Rational(11)),
+            hasBounds(copy.bound(first), Rational(7), Rational(7)) &&
+            hasBounds(copy.bound(distant), Rational(9), Rational(11)),
             "paged Box COW mutated a source or detached unrelated data");
 
     BoxDomain sharedPages = BoxDomain::top();
@@ -292,8 +292,8 @@ void testPagedCopyOnWriteAndSerialization()
     BoxDomain partialJoin = sharedPages;
     partialJoin.joinWith(oneChanged);
     require(hasBounds(partialJoin.bound(first), Rational(5), Rational(7)) &&
-                hasBounds(partialJoin.bound(variables[200]), Rational(5),
-                          Rational(5)),
+            hasBounds(partialJoin.bound(variables[200]), Rational(5),
+                      Rational(5)),
             "page-wise Box join lost a changed or shared page");
 
     const Variable samePage(first.id() + 1);
@@ -302,16 +302,16 @@ void testPagedCopyOnWriteAndSerialization()
     BoxDomain missingSlotJoin = original;
     missingSlotJoin.joinWith(disjointSlot);
     require(missingSlotJoin.bound(first).isTop() &&
-                missingSlotJoin.bound(samePage).isTop() &&
-                missingSlotJoin.bound(distant).isTop(),
+            missingSlotJoin.bound(samePage).isTop() &&
+            missingSlotJoin.bound(distant).isTop(),
             "page-wise Box join did not treat missing slots as Top");
 
     const NumericalDomain::RawBuffer raw = original.serializeRaw();
     std::unique_ptr<NumericalDomain> restored =
         NumericalDomain::deserializeRaw(raw);
     require(restored->isDomain<BoxDomain>() &&
-                restored->isEquivalentTo(original) == CheckResult::True &&
-                restored->hash() == original.hash(),
+            restored->isEquivalentTo(original) == CheckResult::True &&
+            restored->hash() == original.hash(),
             "Box raw round-trip changed semantic state or hash");
     NumericalDomain::RawBuffer corrupt = raw;
     corrupt[corrupt.size() / 2] ^= 1U;
@@ -333,11 +333,11 @@ void testBoxAddressDomainMemoryFacet()
     require(state.isTop(),
             "empty typed Box program state was not unconstrained");
     BoxAddressDomain unreachable(BoxDomain::bottom(),
-                                MemoryLayout({{object, cell}}));
+    MemoryLayout({{object, cell}}));
     BoxAddressDomain firstMerge = unreachable;
     firstMerge.joinWith(state);
     require(firstMerge.isEquivalentTo(state) == CheckResult::True &&
-                unreachable.isSubsetOf(state) == CheckResult::True,
+            unreachable.isSubsetOf(state) == CheckResult::True,
             "Box program-state Bottom did not act as the join identity");
     state.allocate(object);
     state.assignPointer(pointer, AddressSet::singleton(object));
@@ -350,7 +350,7 @@ void testBoxAddressDomainMemoryFacet()
 
     layout.extend(lateObject, lateCell);
     require(state.memoryLayout().contains(lateObject) &&
-                state.memoryLayout().contentOf(lateObject) == lateCell,
+            state.memoryLayout().contentOf(lateObject) == lateCell,
             "an existing state did not observe a monotone layout extension");
     state.allocate(lateObject);
     state.assignPointer(pointer, AddressSet::singleton(lateObject));
@@ -381,7 +381,7 @@ void testLifetimeDomain()
     LifetimeDomain freed = alive;
     freed.release(object);
     require(alive.statusOf(object) == Lifetime::Alive &&
-                freed.mustBeFreed(object),
+            freed.mustBeFreed(object),
             "lifetime copy-on-write changed the source property");
 
     LifetimeDomain maybeFreed = alive;
@@ -401,11 +401,11 @@ void testAddressDomain()
     const Location second(20);
     AddressDomain unreachable = AddressDomain::bottom();
     require(unreachable.kind() == DomainKind::Address &&
-                unreachable.isBottom() && unreachable.addressSet(p).isBottom(),
+            unreachable.isBottom() && unreachable.addressSet(p).isBottom(),
             "Address bottom did not represent an unreachable property");
     AddressDomain unknown = AddressDomain::top();
     require(unknown.isTop() && unknown.addressSet(p).isTop() &&
-                unknown.nonDefaultVariables().empty(),
+            unknown.nonDefaultVariables().empty(),
             "Address top did not represent an unknown pointer sparsely");
     AddressDomain independentTop = AddressDomain::top();
     independentTop.assign(p, AddressSet::singleton(first));
@@ -413,7 +413,7 @@ void testAddressDomain()
             "mutating one Address Top changed another Top instance");
     require(
         Location::null().isNull() &&
-            AddressSet::singleton(Location::null()).contains(Location::null()),
+        AddressSet::singleton(Location::null()).contains(Location::null()),
         "Address domain did not preserve the explicit null location");
 
     AddressDomain addresses = AddressDomain::top();
@@ -421,8 +421,8 @@ void testAddressDomain()
     AddressDomain copy = addresses;
     copy.assign(p, AddressSet::singleton(second));
     require(addresses.addressSet(p).contains(first) &&
-                !addresses.addressSet(p).contains(second) &&
-                copy.addressSet(p).contains(second),
+            !addresses.addressSet(p).contains(second) &&
+            copy.addressSet(p).contains(second),
             "Address copy-on-write changed the source property");
     AddressDomain ranged = addresses;
     ranged.assign(q, AddressSet::singleton(second));
@@ -434,10 +434,10 @@ void testAddressDomain()
     AddressDomain joined = addresses;
     joined.joinWith(copy);
     require(joined.addressSet(p).contains(first) &&
-                joined.addressSet(p).contains(second) &&
-                joined.addressSet(p).hasIntersection(addresses.addressSet(p)) &&
-                addresses.isSubsetOf(joined) == CheckResult::True &&
-                copy.isSubsetOf(joined) == CheckResult::True,
+            joined.addressSet(p).contains(second) &&
+            joined.addressSet(p).hasIntersection(addresses.addressSet(p)) &&
+            addresses.isSubsetOf(joined) == CheckResult::True &&
+            copy.isSubsetOf(joined) == CheckResult::True,
             "Address join or ordering lost a possible location");
 
     AddressDomain unknownJoin = addresses;
@@ -463,13 +463,13 @@ void testAddressDomain()
 
     joined.forget(p);
     require(joined.isTop() && joined.addressSet(p).isTop() &&
-                joined.addressSet(q).isTop(),
+            joined.addressSet(q).isTop(),
             "Address forget did not restore the missing-is-Top invariant");
 
     AddressDomain emptyPointer = AddressDomain::top();
     emptyPointer.assign(p, AddressSet::bottom());
     require(!emptyPointer.isBottom() && emptyPointer.addressSet(p).isBottom() &&
-                emptyPointer.addressSet(q).isTop(),
+            emptyPointer.addressSet(q).isTop(),
             "an empty pointer fact was confused with whole-property Bottom");
 
     AddressSet reordered = AddressSet::bottom();
@@ -486,7 +486,7 @@ void testAddressDomain()
     AddressSet isolatedSet = reordered;
     isolatedSet.insert(Location(50));
     require(!reordered.contains(Location(50)) &&
-                isolatedSet.contains(Location(50)),
+            isolatedSet.contains(Location(50)),
             "AddressSet growth changed a copied finite set");
 
     AddressDomain large = AddressDomain::top();
@@ -502,15 +502,15 @@ void testAddressDomain()
     isolatedLarge.assign(sparseVariables[17],
                          AddressSet::singleton(Location(9999)));
     require(large.addressSet(sparseVariables[17]).contains(Location(117)) &&
-                !large.addressSet(sparseVariables[17]).contains(
-                    Location(9999)) &&
-                isolatedLarge.addressSet(sparseVariables[17])
-                    .contains(Location(9999)),
+            !large.addressSet(sparseVariables[17]).contains(
+                Location(9999)) &&
+            isolatedLarge.addressSet(sparseVariables[17])
+            .contains(Location(9999)),
             "large sparse Address copy-on-write changed the source property");
     for (Variable variable : sparseVariables)
         isolatedLarge.forget(variable);
     require(isolatedLarge.isTop() &&
-                large.nonDefaultVariables().size() == sparseVariables.size(),
+            large.nonDefaultVariables().size() == sparseVariables.size(),
             "large sparse Address erasure lost Top normalization or source "
             "isolation");
 
@@ -524,11 +524,13 @@ void testAddressDomainDifferential()
     using ReferenceSet = std::set<std::uint32_t>;
     using ReferenceDomain = std::map<std::uint32_t, ReferenceSet>;
     std::uint32_t random = 0x4d595df4U;
-    auto next = [&] {
+    auto next = [&]
+    {
         random = random * 1664525U + 1013904223U;
         return random;
     };
-    auto makeAddresses = [&](ReferenceSet& reference) {
+    auto makeAddresses = [&](ReferenceSet& reference)
+    {
         AddressSet value = AddressSet::bottom();
         const std::uint32_t count = next() % 6;
         for (std::uint32_t index = 0; index < count; ++index)
@@ -540,7 +542,8 @@ void testAddressDomainDifferential()
         return value;
     };
     auto compare = [&](const AddressDomain& actual,
-                       const ReferenceDomain& reference) {
+                       const ReferenceDomain& reference)
+    {
         const std::vector<Variable> variables = actual.nonDefaultVariables();
         require(variables.size() == reference.size(),
                 "Address differential support size mismatch");

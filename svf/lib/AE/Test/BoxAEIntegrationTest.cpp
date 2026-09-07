@@ -70,7 +70,7 @@ const BoxAddressDomain& requireBoxAddressDomain(
 }
 
 const BoxAddressDomain& stateForValue(AbstractInterpretation& analysis,
-                                     const ValVar* value, const ICFGNode* node)
+                                      const ValVar* value, const ICFGNode* node)
 {
     if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
         return requireBoxAddressDomain(*scalar);
@@ -159,7 +159,7 @@ struct StorageObservation
         std::vector<std::size_t> sorted = addressFactsPerState;
         std::sort(sorted.begin(), sorted.end());
         const std::size_t index = static_cast<std::size_t>(
-            fraction * static_cast<double>(sorted.size() - 1));
+                                      fraction * static_cast<double>(sorted.size() - 1));
         return sorted[index];
     }
 
@@ -170,7 +170,7 @@ struct StorageObservation
         std::vector<std::size_t> sorted = addressSetSizes;
         std::sort(sorted.begin(), sorted.end());
         const std::size_t index = static_cast<std::size_t>(
-            fraction * static_cast<double>(sorted.size() - 1));
+                                      fraction * static_cast<double>(sorted.size() - 1));
         return sorted[index];
     }
 };
@@ -196,7 +196,7 @@ VariablePopulation observeVariablePopulation(const SVFIR& graph)
         if (const auto* scalar = SVFUtil::dyn_cast<ValVar>(value))
         {
             if (scalar->isPointer() &&
-                !scalar->isConstDataOrAggDataButNotNullPtr())
+                    !scalar->isConstDataOrAggDataButNotNullPtr())
                 ++population.pointerScalars;
         }
         else if (const auto* object = SVFUtil::dyn_cast<ObjVar>(value))
@@ -224,7 +224,8 @@ std::uint64_t semanticChecksum(AbstractInterpretation& analysis)
     constexpr std::uint64_t offset = 14695981039346656037ULL;
     constexpr std::uint64_t prime = 1099511628211ULL;
     std::uint64_t hash = offset;
-    auto consume = [&](const std::string& value) {
+    auto consume = [&](const std::string& value)
+    {
         for (unsigned char byte : value)
         {
             hash ^= byte;
@@ -237,9 +238,10 @@ std::uint64_t semanticChecksum(AbstractInterpretation& analysis)
     std::vector<const ICFGNode*> nodes(analysis.getAnalyzedNodes().begin(),
                                        analysis.getAnalyzedNodes().end());
     std::sort(nodes.begin(), nodes.end(),
-              [](const ICFGNode* lhs, const ICFGNode* rhs) {
-                  return lhs->getId() < rhs->getId();
-              });
+              [](const ICFGNode* lhs, const ICFGNode* rhs)
+    {
+        return lhs->getId() < rhs->getId();
+    });
     for (const ICFGNode* node : nodes)
     {
         consume(std::to_string(node->getId()));
@@ -290,7 +292,7 @@ std::size_t basicBlockOrdinal(const SVFBasicBlock* block)
     const FunObjVar* function = block->getFunction();
     std::size_t ordinal = 0;
     for (auto iterator = function->begin(); iterator != function->end();
-         ++iterator, ++ordinal)
+            ++iterator, ++ordinal)
     {
         if (iterator->second == block)
             return ordinal;
@@ -320,7 +322,7 @@ std::string programPointKey(const ICFGNode* node)
     std::string result = "fun=" + functionKey(node->getFun());
     result += ";kind=" + std::to_string(node->getNodeKind());
     if (SVFUtil::isa<FunEntryICFGNode>(node) ||
-        SVFUtil::isa<FunExitICFGNode>(node))
+            SVFUtil::isa<FunExitICFGNode>(node))
         return result;
     if (const auto* ret = SVFUtil::dyn_cast<RetICFGNode>(node))
         return result + ";call=" +
@@ -433,15 +435,15 @@ void addAnchorVariable(std::map<std::string, const ValVar*>& variables,
         // analysis. Their domain-specific encoding is covered by dedicated
         // transfer tests and must not make the state-result projection differ.
         if (scalar->isConstDataOrAggDataButNotNullPtr() ||
-            SVFUtil::isa<ConstNullPtrValVar>(scalar) ||
-            SVFUtil::isa<DummyValVar>(scalar) ||
-            !hasUpstreamComparableType(*scalar))
+                SVFUtil::isa<ConstNullPtrValVar>(scalar) ||
+                SVFUtil::isa<DummyValVar>(scalar) ||
+                !hasUpstreamComparableType(*scalar))
             return;
         const std::string key = valueVariableKey(scalar);
         const auto [iterator, inserted] = variables.emplace(key, scalar);
         if (!inserted && iterator->second != scalar &&
-            !SVFUtil::isa<GepValVar>(iterator->second) &&
-            !SVFUtil::isa<GepValVar>(scalar))
+                !SVFUtil::isa<GepValVar>(iterator->second) &&
+                !SVFUtil::isa<GepValVar>(scalar))
             throw std::runtime_error("non-unique semantic value key: " + key);
     }
 }
@@ -452,7 +454,7 @@ std::map<std::string, const ValVar*> anchorVariables(const ICFGNode* node)
     for (const SVFStmt* statement : node->getSVFStmts())
     {
         if (const auto* assignment =
-                SVFUtil::dyn_cast<AssignStmt>(statement))
+                    SVFUtil::dyn_cast<AssignStmt>(statement))
         {
             addAnchorVariable(variables, assignment->getRHSVar());
             addAnchorVariable(variables, assignment->getLHSVar());
@@ -464,7 +466,7 @@ std::map<std::string, const ValVar*> anchorVariables(const ICFGNode* node)
             for (const ValVar* operand : multi->getOpndVars())
                 addAnchorVariable(variables, operand);
             if (const auto* select =
-                    SVFUtil::dyn_cast<SelectStmt>(statement))
+                        SVFUtil::dyn_cast<SelectStmt>(statement))
                 addAnchorVariable(variables, select->getCondition());
         }
         else if (const auto* unary =
@@ -518,13 +520,13 @@ std::map<MemoryQuery, const ObjVar*> anchorMemoryObjects(
         for (NodeID objectId : pointerAnalysis.getPts(pointer->getId()))
         {
             if (const auto* object =
-                    SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(objectId)))
+                        SVFUtil::dyn_cast<ObjVar>(graph.getSVFVar(objectId)))
             {
                 if (!pointerContent && !comparableContent)
                     continue;
                 objects.emplace(MemoryQuery{std::string(accessKind) +
-                                                ";pointer=" +
-                                                keyPart(valueVariableKey(pointer)),
+                                            ";pointer=" +
+                                            keyPart(valueVariableKey(pointer)),
                                             memoryObjectKey(object),
                                             pointerContent},
                                 object);
@@ -556,9 +558,9 @@ void validateDynamicObjectRegistration(SVFIR& graph)
     const AD::Variable content = adapter.contentVariable(*object);
     const ObjVar* reverseContent = adapter.contentObject(content);
     if (location.isNull() || !layoutSnapshot.contains(location) ||
-        layoutSnapshot.contentOf(location) != content ||
-        adapter.object(location).getId() != object->getId() ||
-        !reverseContent || reverseContent->getId() != object->getId())
+            layoutSnapshot.contentOf(location) != content ||
+            adapter.object(location).getId() != object->getId() ||
+            !reverseContent || reverseContent->getId() != object->getId())
     {
         throw std::runtime_error(
             "dynamic ObjVar registration did not extend the shared memory "
@@ -595,12 +597,12 @@ void validateGlobalGepInitializers(
     {
         const auto* gep = SVFUtil::dyn_cast<GepStmt>(statement);
         if (!gep || !gep->getLHSVar()->isPointer() ||
-            !gep->getLHSVar()->isConstDataOrAggDataButNotNullPtr())
+                !gep->getLHSVar()->isConstDataOrAggDataButNotNullPtr())
             continue;
         const AD::AddressSet addresses =
             analysis.getAddressSet(gep->getLHSVar(), global);
         if (addresses.isTop() || addresses.isBottom() ||
-            addresses.contains(AD::Location::null()))
+                addresses.contains(AD::Location::null()))
             throw std::runtime_error(
                 "global constant GEP lost its non-null address");
         ++checked;
@@ -622,14 +624,16 @@ ResultChecksum resultChecksum(const SVFIR& graph,
     std::map<std::string, const ICFGNode*> pointOwners;
     auto numericalRecord = [&](const char* kind, const std::string& point,
                                const std::string& query,
-                               const AD::Interval& value) {
+                               const AD::Interval& value)
+    {
         records.push_back(std::string(kind) + '|' + keyPart(point) + '|' +
                           keyPart(query) + "|N|" +
                           canonicalInterval(value));
     };
     auto addressRecord = [&](const char* kind, const std::string& point,
                              const std::string& query,
-                             const AD::AddressSet& value) {
+                             const AD::AddressSet& value)
+    {
         records.push_back(std::string(kind) + '|' + keyPart(point) + '|' +
                           keyPart(query) + "|A|" +
                           canonicalAddressSet(value, analysis));
@@ -637,12 +641,13 @@ ResultChecksum resultChecksum(const SVFIR& graph,
 
     std::vector<const ICFGNode*> nodes;
     for (auto iterator = graph.getICFG()->begin();
-         iterator != graph.getICFG()->end(); ++iterator)
+            iterator != graph.getICFG()->end(); ++iterator)
         nodes.push_back(iterator->second);
     std::sort(nodes.begin(), nodes.end(),
-              [](const ICFGNode* lhs, const ICFGNode* rhs) {
-                  return lhs->getId() < rhs->getId();
-              });
+              [](const ICFGNode* lhs, const ICFGNode* rhs)
+    {
+        return lhs->getId() < rhs->getId();
+    });
     for (const ICFGNode* node : nodes)
     {
         const std::string point = programPointKey(node);
@@ -665,31 +670,31 @@ ResultChecksum resultChecksum(const SVFIR& graph,
             if (value->isPointer())
             {
                 const AD::AddressSet answer = analysis.hasAbsValue(value, node)
-                                                  ? analysis.getAddressSet(
-                                                        value, node)
-                                                  : AD::AddressSet::top();
+                                              ? analysis.getAddressSet(
+                                                  value, node)
+                                              : AD::AddressSet::top();
                 addressRecord("V", point, query, answer);
             }
             else
             {
                 const AD::Interval answer = analysis.hasAbsValue(value, node)
-                                                ? analysis.getInterval(value,
-                                                                       node)
-                                                : AD::Interval::top();
+                                            ? analysis.getInterval(value,
+                                                node)
+                                            : AD::Interval::top();
                 numericalRecord("V", point, query, answer);
             }
         }
 
         for (const auto& [query, object] :
-             anchorMemoryObjects(graph, pointerAnalysis, node))
+                anchorMemoryObjects(graph, pointerAnalysis, node))
         {
             const auto& [statement, objectKey, pointerContent] = query;
             if (pointerContent)
             {
                 const AD::AddressSet answer = analysis.hasAbsValue(object, node)
-                                                  ? analysis.getAddressSet(
-                                                        object, node)
-                                                  : AD::AddressSet::top();
+                                              ? analysis.getAddressSet(
+                                                  object, node)
+                                              : AD::AddressSet::top();
                 addressRecord("M", point,
                               statement + ";object=" + keyPart(objectKey),
                               answer);
@@ -697,9 +702,9 @@ ResultChecksum resultChecksum(const SVFIR& graph,
             else
             {
                 const AD::Interval answer = analysis.hasAbsValue(object, node)
-                                                ? analysis.getInterval(object,
-                                                                       node)
-                                                : AD::Interval::top();
+                                            ? analysis.getInterval(object,
+                                                node)
+                                            : AD::Interval::top();
                 numericalRecord("M", point,
                                 statement + ";object=" + keyPart(objectKey),
                                 answer);
@@ -708,8 +713,8 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                 "F|" + keyPart(point) + '|' +
                 keyPart(statement + ";object=" + keyPart(objectKey)) + '|' +
                 (analysis.isFreedMemory(analysis.locationOf(object), node)
-                     ? '1'
-                     : '0'));
+                 ? '1'
+                 : '0'));
         }
     }
 
@@ -761,7 +766,8 @@ std::string stateShape(const BoxAddressDomain& state)
     std::sort(addresses.begin(), addresses.end());
 
     std::string shape;
-    auto append = [&](char kind, const std::vector<std::string>& values) {
+    auto append = [&](char kind, const std::vector<std::string>& values)
+    {
         shape += kind;
         shape += std::to_string(values.size());
         shape += ':';
@@ -820,18 +826,19 @@ void validateVariableIdLayout(const SVFIR& graph)
         {
             if (adapter.contains(*scalar))
                 (scalar->isPointer() ? pointerScalarIds : numericalScalarIds)
-                    .push_back(adapter.variable(*scalar).id());
+                .push_back(adapter.variable(*scalar).id());
         }
         else if (const auto* object = SVFUtil::dyn_cast<ObjVar>(value))
         {
             if (adapter.contains(*object))
                 (object->isPointer() ? pointerContentIds : numericalContentIds)
-                    .push_back(adapter.contentVariable(*object).id());
+                .push_back(adapter.contentVariable(*object).id());
         }
     }
 
     std::uint32_t expected = 1;
-    auto requireContiguousRange = [&](const char* name, auto& ids) {
+    auto requireContiguousRange = [&](const char* name, auto& ids)
+    {
         std::sort(ids.begin(), ids.end());
         for (std::uint32_t id : ids)
         {
@@ -873,7 +880,7 @@ void validateProjection(const SVFIR& graph, AbstractInterpretation& analysis)
         const AD::Interval stored = state.numerical().bound(variable);
         lastStored = stored.toString();
         if (hasFiniteBounds(projected, expectedLower, expectedUpper) &&
-            hasFiniteBounds(stored, expectedLower, expectedUpper))
+                hasFiniteBounds(stored, expectedLower, expectedUpper))
             observed = true;
     }
     if (!observed)
@@ -905,7 +912,8 @@ void validateSparseMemoryRefinement(const SVFIR& graph,
 void validateConservativeUnknownCasts(const SVFIR& graph,
                                       AbstractInterpretation& analysis)
 {
-    auto findScalar = [&](const char* name) -> const ValVar* {
+    auto findScalar = [&](const char* name) -> const ValVar*
+    {
         const SVFVar* value = findValue(graph, name);
         return value ? SVFUtil::dyn_cast<ValVar>(value) : nullptr;
     };
@@ -945,21 +953,21 @@ void validateFloatingConstants(const SVFIR& graph,
     const SVFVar* memoryComparisonCandidate =
         findValue(graph, "memory_is_exact");
     const auto* result = candidate ? SVFUtil::dyn_cast<ValVar>(candidate)
-                                   : nullptr;
+                         : nullptr;
     const auto* fractional =
         fractionalCandidate
-            ? SVFUtil::dyn_cast<ValVar>(fractionalCandidate)
-            : nullptr;
+        ? SVFUtil::dyn_cast<ValVar>(fractionalCandidate)
+        : nullptr;
     const auto* comparison =
         comparisonCandidate
-            ? SVFUtil::dyn_cast<ValVar>(comparisonCandidate)
-            : nullptr;
+        ? SVFUtil::dyn_cast<ValVar>(comparisonCandidate)
+        : nullptr;
     const auto* memory =
         memoryCandidate ? SVFUtil::dyn_cast<ValVar>(memoryCandidate) : nullptr;
     const auto* memoryComparison =
         memoryComparisonCandidate
-            ? SVFUtil::dyn_cast<ValVar>(memoryComparisonCandidate)
-            : nullptr;
+        ? SVFUtil::dyn_cast<ValVar>(memoryComparisonCandidate)
+        : nullptr;
     if (!result && !fractional && !comparison && !memory && !memoryComparison)
         return;
     if (!result || !fractional || !comparison || !memory || !memoryComparison)
@@ -968,8 +976,8 @@ void validateFloatingConstants(const SVFIR& graph,
         SVFIRAdapter(graph).variable(*fractional);
     const AD::NumericType& type = fractionalVariable.type();
     if (type.kind != AD::NumericKind::IEEEFloat ||
-        type.floatFormat.exponentBits != 11 ||
-        type.floatFormat.significandBits != 53)
+            type.floatFormat.exponentBits != 11 ||
+            type.floatFormat.significandBits != 53)
         throw std::runtime_error(
             "double ValVar was not mapped to IEEE binary64");
     bool observedIntegral = false;
@@ -985,18 +993,18 @@ void validateFloatingConstants(const SVFIR& graph,
         const AD::Interval fraction = analysis.getInterval(fractional, node);
         observedFractional |= fraction.isSingleton() &&
                               fraction.singletonValue() ==
-                                  AD::Rational::fromDouble(0.5);
+                              AD::Rational::fromDouble(0.5);
         observedComparison |=
             hasFiniteBounds(analysis.getInterval(comparison, node), 1, 1);
         const AD::Interval memoryValue = analysis.getInterval(memory, node);
         observedMemory |= memoryValue.isSingleton() &&
                           memoryValue.singletonValue() ==
-                              AD::Rational::fromDouble(0.5);
+                          AD::Rational::fromDouble(0.5);
         observedMemoryComparison |= hasFiniteBounds(
-            analysis.getInterval(memoryComparison, node), 1, 1);
+                                        analysis.getInterval(memoryComparison, node), 1, 1);
     }
     if (!observedIntegral || !observedFractional || !observedComparison ||
-        !observedMemory || !observedMemoryComparison)
+            !observedMemory || !observedMemoryComparison)
     {
         const ICFGNode* point = comparison->getICFGNode();
         throw std::runtime_error(
@@ -1111,8 +1119,8 @@ void validatePointerOrderingFlow(const SVFIR& graph,
     if (!orderingCandidate && !sameCandidate)
         return;
     const auto* ordering = orderingCandidate
-                               ? SVFUtil::dyn_cast<ValVar>(orderingCandidate)
-                               : nullptr;
+                           ? SVFUtil::dyn_cast<ValVar>(orderingCandidate)
+                           : nullptr;
     const auto* same =
         sameCandidate ? SVFUtil::dyn_cast<ValVar>(sameCandidate) : nullptr;
     const auto* zext =
@@ -1133,7 +1141,7 @@ void validatePointerOrderingFlow(const SVFIR& graph,
             hasFiniteBounds(analysis.getInterval(zext, node), 0, 1);
     }
     if (!observedUnknownOrdering || !observedKnownSameOrdering ||
-        !observedZExtRange)
+            !observedZExtRange)
         throw std::runtime_error(
             "pointer ordering used abstract Location IDs as concrete order");
 }
@@ -1163,7 +1171,7 @@ int main(int argc, char** argv)
     try
     {
         const std::vector<std::string> modules = OptionBase::parseOptions(
-            argc, argv, "Box AE integration test", "[options] <input-bitcode>");
+                argc, argv, "Box AE integration test", "[options] <input-bitcode>");
         LLVMModuleSet::getLLVMModuleSet()->buildSVFModule(modules);
         SVFIRBuilder builder;
         SVFIR* graph = builder.build();
@@ -1215,57 +1223,57 @@ int main(int argc, char** argv)
             const VariablePopulation population =
                 observeVariablePopulation(*graph);
             std::cout
-                << "AE_STORAGE_OBSERVATION flow_states=" << storage.flow.states
-                << " flow_numerical_facts=" << storage.flow.numericalFacts
-                << " flow_numerical_pages=" << storage.flow.numericalPages
-                << " flow_address_facts=" << storage.flow.addressFacts
-                << " flow_address_pages8=" << storage.flow.addressPages8
-                << " flow_address_pages16=" << storage.flow.addressPages16
-                << " flow_address_pages32=" << storage.flow.addressPages32
-                << " flow_address_states_above16="
-                << storage.flow.addressStatesAbove16
-                << " flow_address_facts_above16="
-                << storage.flow.addressFactsAbove16
-                << " flow_address_pages16_above16="
-                << storage.flow.addressPages16Above16
-                << " flow_address_p50=" << storage.flow.percentile(0.50)
-                << " flow_address_p95=" << storage.flow.percentile(0.95)
-                << " flow_address_p99=" << storage.flow.percentile(0.99)
-                << " flow_address_max=" << storage.flow.percentile(1.0)
-                << " flow_finite_pointees=" << storage.flow.finitePointees
-                << " flow_set_size_p50=" << storage.flow.setSizePercentile(0.50)
-                << " flow_set_size_p95=" << storage.flow.setSizePercentile(0.95)
-                << " flow_set_size_p99=" << storage.flow.setSizePercentile(0.99)
-                << " flow_largest_address_set="
-                << storage.flow.largestAddressSet
-                << " scalar_numerical_facts=" << storage.scalar.numericalFacts
-                << " scalar_address_facts=" << storage.scalar.addressFacts
-                << " scalar_address_pages8=" << storage.scalar.addressPages8
-                << " scalar_address_pages16=" << storage.scalar.addressPages16
-                << " scalar_address_pages32=" << storage.scalar.addressPages32
-                << " scalar_address_states_above16="
-                << storage.scalar.addressStatesAbove16
-                << " scalar_address_facts_above16="
-                << storage.scalar.addressFactsAbove16
-                << " scalar_address_pages16_above16="
-                << storage.scalar.addressPages16Above16
-                << " scalar_finite_pointees=" << storage.scalar.finitePointees
-                << " scalar_set_size_p50="
-                << storage.scalar.setSizePercentile(0.50)
-                << " scalar_set_size_p95="
-                << storage.scalar.setSizePercentile(0.95)
-                << " scalar_set_size_p99="
-                << storage.scalar.setSizePercentile(0.99)
-                << " scalar_largest_address_set="
-                << storage.scalar.largestAddressSet
-                << " pointer_scalar_variables=" << population.pointerScalars
-                << " pointer_content_variables=" << population.pointerContents
-                << " finite_pointees="
-                << storage.flow.finitePointees + storage.scalar.finitePointees
-                << " largest_address_set="
-                << std::max(storage.flow.largestAddressSet,
-                            storage.scalar.largestAddressSet)
-                << '\n';
+                    << "AE_STORAGE_OBSERVATION flow_states=" << storage.flow.states
+                    << " flow_numerical_facts=" << storage.flow.numericalFacts
+                    << " flow_numerical_pages=" << storage.flow.numericalPages
+                    << " flow_address_facts=" << storage.flow.addressFacts
+                    << " flow_address_pages8=" << storage.flow.addressPages8
+                    << " flow_address_pages16=" << storage.flow.addressPages16
+                    << " flow_address_pages32=" << storage.flow.addressPages32
+                    << " flow_address_states_above16="
+                    << storage.flow.addressStatesAbove16
+                    << " flow_address_facts_above16="
+                    << storage.flow.addressFactsAbove16
+                    << " flow_address_pages16_above16="
+                    << storage.flow.addressPages16Above16
+                    << " flow_address_p50=" << storage.flow.percentile(0.50)
+                    << " flow_address_p95=" << storage.flow.percentile(0.95)
+                    << " flow_address_p99=" << storage.flow.percentile(0.99)
+                    << " flow_address_max=" << storage.flow.percentile(1.0)
+                    << " flow_finite_pointees=" << storage.flow.finitePointees
+                    << " flow_set_size_p50=" << storage.flow.setSizePercentile(0.50)
+                    << " flow_set_size_p95=" << storage.flow.setSizePercentile(0.95)
+                    << " flow_set_size_p99=" << storage.flow.setSizePercentile(0.99)
+                    << " flow_largest_address_set="
+                    << storage.flow.largestAddressSet
+                    << " scalar_numerical_facts=" << storage.scalar.numericalFacts
+                    << " scalar_address_facts=" << storage.scalar.addressFacts
+                    << " scalar_address_pages8=" << storage.scalar.addressPages8
+                    << " scalar_address_pages16=" << storage.scalar.addressPages16
+                    << " scalar_address_pages32=" << storage.scalar.addressPages32
+                    << " scalar_address_states_above16="
+                    << storage.scalar.addressStatesAbove16
+                    << " scalar_address_facts_above16="
+                    << storage.scalar.addressFactsAbove16
+                    << " scalar_address_pages16_above16="
+                    << storage.scalar.addressPages16Above16
+                    << " scalar_finite_pointees=" << storage.scalar.finitePointees
+                    << " scalar_set_size_p50="
+                    << storage.scalar.setSizePercentile(0.50)
+                    << " scalar_set_size_p95="
+                    << storage.scalar.setSizePercentile(0.95)
+                    << " scalar_set_size_p99="
+                    << storage.scalar.setSizePercentile(0.99)
+                    << " scalar_largest_address_set="
+                    << storage.scalar.largestAddressSet
+                    << " pointer_scalar_variables=" << population.pointerScalars
+                    << " pointer_content_variables=" << population.pointerContents
+                    << " finite_pointees="
+                    << storage.flow.finitePointees + storage.scalar.finitePointees
+                    << " largest_address_set="
+                    << std::max(storage.flow.largestAddressSet,
+                                storage.scalar.largestAddressSet)
+                    << '\n';
         }
         std::cout << "Box AE integration test: PASS\n";
         AndersenWaveDiff::releaseAndersenWaveDiff();

@@ -248,7 +248,7 @@ public:
         GenericBug::EventStack eventStack;
         SVFBugEvent sourceInstEvent(SVFBugEvent::EventType::SourceInst, node);
         eventStack.push_back(sourceInstEvent); // Add the source instruction
-                                               // event to the event stack
+        // event to the event stack
 
         if (eventStack.empty())
         {
@@ -257,7 +257,7 @@ public:
 
         std::string loc =
             eventStack.back().getEventLoc(); // Get the location of the last
-                                             // event in the stack
+        // event in the stack
 
         // Check if the bug at this location has already been reported
         if (bugLoc.find(loc) != bugLoc.end())
@@ -284,14 +284,14 @@ public:
         if (!nodeToBugInfo.empty())
         {
             std::cerr << "######################Buffer Overflow (" +
-                             std::to_string(nodeToBugInfo.size()) +
-                             " found)######################\n";
+                      std::to_string(nodeToBugInfo.size()) +
+                      " found)######################\n";
             std::cerr << "---------------------------------------------\n";
             for (const auto& it : nodeToBugInfo)
             {
                 std::cerr
-                    << it.second
-                    << "\n---------------------------------------------\n";
+                        << it.second
+                        << "\n---------------------------------------------\n";
             }
         }
     }
@@ -337,16 +337,16 @@ private:
 
 private:
     Map<const GepObjVar*, AbstractDomain::Interval>
-        gepObjOffsetFromBase; ///< Maps GEP objects to their offsets from the
-                              ///< base.
+    gepObjOffsetFromBase; ///< Maps GEP objects to their offsets from the
+    ///< base.
     Map<std::string, std::vector<std::pair<u32_t, u32_t>>>
-        extAPIBufOverflowCheckRules; ///< Rules for checking buffer overflows in
-                                     ///< external APIs.
+    extAPIBufOverflowCheckRules; ///< Rules for checking buffer overflows in
+    ///< external APIs.
     Set<std::string>
-        bugLoc;           ///< Set of locations where bugs have been reported.
+    bugLoc;           ///< Set of locations where bugs have been reported.
     SVFBugReport recoder; ///< Recorder for abstract execution bugs.
     Map<const ICFGNode*, std::string>
-        nodeToBugInfo; ///< Maps ICFG nodes to bug information.
+    nodeToBugInfo; ///< Maps ICFG nodes to bug information.
 };
 class NullptrDerefDetector : public AEDetector
 {
@@ -388,7 +388,7 @@ public:
         GenericBug::EventStack eventStack;
         SVFBugEvent sourceInstEvent(SVFBugEvent::EventType::SourceInst, node);
         eventStack.push_back(sourceInstEvent); // Add the source instruction
-                                               // event to the event stack
+        // event to the event stack
 
         if (eventStack.empty())
         {
@@ -396,7 +396,7 @@ public:
         }
         std::string loc =
             eventStack.back().getEventLoc(); // Get the location of the last
-                                             // event in the stack
+        // event in the stack
 
         // Check if the bug at this location has already been reported
         if (bugLoc.find(loc) != bugLoc.end())
@@ -421,14 +421,14 @@ public:
         if (!nodeToBugInfo.empty())
         {
             std::cerr << "###################### Nullptr Dereference (" +
-                             std::to_string(nodeToBugInfo.size()) +
-                             " found)######################\n";
+                      std::to_string(nodeToBugInfo.size()) +
+                      " found)######################\n";
             std::cerr << "---------------------------------------------\n";
             for (const auto& it : nodeToBugInfo)
             {
                 std::cerr
-                    << it.second
-                    << "\n---------------------------------------------\n";
+                        << it.second
+                        << "\n---------------------------------------------\n";
             }
         }
     }
@@ -444,9 +444,9 @@ public:
 
 private:
     Set<std::string>
-        bugLoc;           ///< Set of locations where bugs have been reported.
+    bugLoc;           ///< Set of locations where bugs have been reported.
     SVFBugReport recoder; ///< Recorder for abstract execution bugs.
     Map<const ICFGNode*, std::string>
-        nodeToBugInfo; ///< Maps ICFG nodes to bug information.
+    nodeToBugInfo; ///< Maps ICFG nodes to bug information.
 };
 } // namespace SVF

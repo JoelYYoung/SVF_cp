@@ -75,7 +75,7 @@ struct NumericType
         return lhs.kind == rhs.kind &&
                lhs.floatFormat.exponentBits == rhs.floatFormat.exponentBits &&
                lhs.floatFormat.significandBits ==
-                   rhs.floatFormat.significandBits;
+               rhs.floatFormat.significandBits;
     }
     friend bool operator!=(const NumericType& lhs, const NumericType& rhs)
     {
