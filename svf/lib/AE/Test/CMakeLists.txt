@@ -71,6 +71,17 @@ if(TARGET SvfLLVM)
   add_box_ae_test(
     box-ae-global-scalar-carrier GlobalScalarCarrier.ll dense
   )
+  foreach(sparsity IN ITEMS dense semi-sparse sparse)
+    add_box_ae_test(
+      box-ae-global-gep-initializer-${sparsity}
+      GlobalGepInitializer.ll ${sparsity}
+    )
+    set_tests_properties(
+      box-ae-global-gep-initializer-${sparsity}
+      PROPERTIES
+        ENVIRONMENT "SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS=1"
+    )
+  endforeach()
   add_box_ae_test(
     box-ae-wide-integer WideIntegerTruncation.ll dense
   )

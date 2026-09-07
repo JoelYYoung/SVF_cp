@@ -236,7 +236,7 @@ struct ResultChecksum
 };
 
 std::string canonicalAddressSet(const AD::AddressSet& addresses,
-                                const SVFIRAdapter& adapter)
+                                const AbstractInterpretation& analysis)
 {
     if (addresses.isTop())
         return "top";
@@ -246,8 +246,16 @@ std::string canonicalAddressSet(const AD::AddressSet& addresses,
     objectIds.reserve(addresses.size());
     for (AD::Location location : addresses.locations())
     {
-        objectIds.push_back(
-            location.isNull() ? 0U : adapter.object(location).getId());
+        if (location.isNull())
+        {
+            objectIds.push_back(0U);
+            continue;
+        }
+        const ObjVar* object = analysis.objectAt(location);
+        if (!object)
+            throw std::runtime_error(
+                "analysis address has no Location-to-ObjVar mapping");
+        objectIds.push_back(object->getId());
     }
     std::sort(objectIds.begin(), objectIds.end());
     std::string result = "{";
@@ -390,6 +398,30 @@ void validateDynamicAnalysisRegistration(
             "analysis mapped a dynamically created object to null");
 }
 
+void validateGlobalGepInitializers(
+    SVFIR& graph, AbstractInterpretation& analysis)
+{
+    const ICFGNode* global = graph.getICFG()->getGlobalICFGNode();
+    std::size_t checked = 0;
+    for (const SVFStmt* statement : global->getSVFStmts())
+    {
+        const auto* gep = SVFUtil::dyn_cast<GepStmt>(statement);
+        if (!gep || !gep->getLHSVar()->isPointer() ||
+            !gep->getLHSVar()->isConstDataOrAggDataButNotNullPtr())
+            continue;
+        const AD::AddressSet addresses =
+            analysis.getAddressSet(gep->getLHSVar(), global);
+        if (addresses.isTop() || addresses.isBottom() ||
+            addresses.contains(AD::Location::null()))
+            throw std::runtime_error(
+                "global constant GEP lost its non-null address");
+        ++checked;
+    }
+    if (checked == 0)
+        throw std::runtime_error(
+            "global GEP initializer fixture contains no pointer constant GEP");
+}
+
 /// Hash representation-independent answers at stable semantic query anchors.
 /// Anchors come only from the common SVFIR and Andersen points-to solution;
 /// neither a Box page nor an upstream trace entry can create a record.
@@ -397,7 +429,6 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                               AbstractInterpretation& analysis,
                               AndersenWaveDiff& pointerAnalysis)
 {
-    SVFIRAdapter adapter(graph);
     std::vector<std::string> records;
     auto numericalRecord = [&](const char* kind, NodeID point, NodeID id,
                                const AD::Interval& value) {
@@ -409,7 +440,7 @@ ResultChecksum resultChecksum(const SVFIR& graph,
                              const AD::AddressSet& value) {
         records.push_back(std::string(kind) + '|' + std::to_string(point) +
                           '|' + std::to_string(id) + "|A|" +
-                          canonicalAddressSet(value, adapter));
+                          canonicalAddressSet(value, analysis));
     };
 
     std::vector<const ICFGNode*> nodes;
@@ -713,6 +744,8 @@ int main(int argc, char** argv)
         analysis.runOnModule();
         if (std::getenv("SVF_AE_VALIDATE_DYNAMIC_ADAPTER"))
             validateDynamicAnalysisRegistration(*graph, analysis);
+        if (std::getenv("SVF_AE_VALIDATE_GLOBAL_GEP_INITIALIZERS"))
+            validateGlobalGepInitializers(*graph, analysis);
         validateAuthoritativeStorage(analysis);
         if (std::getenv("SVF_AE_VALIDATE_VARIABLE_ID_LAYOUT"))
             validateVariableIdLayout(*graph);

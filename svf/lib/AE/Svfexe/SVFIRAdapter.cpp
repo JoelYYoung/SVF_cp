@@ -46,7 +46,11 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
             const auto* value = SVFUtil::dyn_cast<ValVar>(svfVariable);
             if (!value || value->isPointer() != pointers)
                 continue;
-            if (value->isConstDataOrAggDataButNotNullPtr())
+            // Integer/floating aggregate constants are interpreted directly
+            // and need no scalar slot.  Pointer constants (notably constant
+            // expression GEPs in global initializers) are transfer results and
+            // must retain their computed AddressSet.
+            if (!pointers && value->isConstDataOrAggDataButNotNullPtr())
                 continue;
             if (!pointers && !SVFUtil::isa<SVFIntegerType>(value->getType()))
                 continue;
