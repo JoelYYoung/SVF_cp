@@ -253,6 +253,16 @@ void DenseAbstractInterpretation::assignInterval(DenseState& denseState,
                                                  AD::Variable variable,
                                                  const AD::Interval& interval)
 {
+    // A singleton is an exact affine assignment.  Committing it directly
+    // avoids encoding the same fact as two inequalities and running the
+    // generic constraint-propagation fixpoint.  Constant-heavy global
+    // initializers exercise this path once per aggregate element.
+    if (interval.isSingleton())
+    {
+        denseState.numerical().assign(
+            variable, AD::LinearExpression(interval.singletonValue()));
+        return;
+    }
     denseState.numerical().forget(variable);
     constrainInterval(denseState, variable, interval);
 }
