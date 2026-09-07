@@ -37,6 +37,10 @@ DIFFERENCE_FIELDS = (
     "input",
     "reference",
     "candidate",
+    "comparison_status",
+    "incomparable_reason",
+    "reference_status",
+    "candidate_status",
     "hash_equal",
     "reference_only_records",
     "candidate_only_records",
@@ -276,28 +280,58 @@ def main():
                             )
                 if phase == "hash" and differences_writer:
                     reference = eligible[0][0]
-                    reference_records = hash_records[reference]
+                    reference_row = hash_rows[reference]
                     for selected in eligible:
                         label = selected[0]
-                        candidate_records = hash_records[label]
-                        reference_only = sorted(
-                            reference_records - candidate_records
-                        )
-                        candidate_only = sorted(
-                            candidate_records - reference_records
-                        )
+                        candidate_row = hash_rows[label]
+                        reasons = []
+                        for role, row in (
+                            ("reference", reference_row),
+                            ("candidate", candidate_row),
+                        ):
+                            if row["status"] != "pass":
+                                reasons.append(f"{role}-{row['status']}")
+                            elif not row["result_hash"]:
+                                reasons.append(f"{role}-missing-hash")
+                        comparable = not reasons
+                        if comparable:
+                            reference_records = hash_records[reference]
+                            candidate_records = hash_records[label]
+                            reference_only = sorted(
+                                reference_records - candidate_records
+                            )
+                            candidate_only = sorted(
+                                candidate_records - reference_records
+                            )
+                        else:
+                            reference_only = []
+                            candidate_only = []
                         differences_writer.writerow(
                             {
                                 "host": platform.node(),
                                 "input": input_label,
                                 "reference": reference,
                                 "candidate": label,
-                                "hash_equal": str(
-                                    hash_rows[reference]["result_hash"]
-                                    == hash_rows[label]["result_hash"]
-                                ).lower(),
-                                "reference_only_records": len(reference_only),
-                                "candidate_only_records": len(candidate_only),
+                                "comparison_status": (
+                                    "comparable" if comparable else "incomparable"
+                                ),
+                                "incomparable_reason": ";".join(reasons),
+                                "reference_status": reference_row["status"],
+                                "candidate_status": candidate_row["status"],
+                                "hash_equal": (
+                                    str(
+                                        reference_row["result_hash"]
+                                        == candidate_row["result_hash"]
+                                    ).lower()
+                                    if comparable
+                                    else ""
+                                ),
+                                "reference_only_records": (
+                                    len(reference_only) if comparable else ""
+                                ),
+                                "candidate_only_records": (
+                                    len(candidate_only) if comparable else ""
+                                ),
                                 "first_reference_only_record": (
                                     reference_only[0] if reference_only else ""
                                 ),
