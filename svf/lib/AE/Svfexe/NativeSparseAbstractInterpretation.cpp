@@ -108,6 +108,28 @@ void NativeSemiSparseAbstractInterpretation::handleSVFStatement(
 {
     PhaseTimer timer(sparseProfile_.statementTransfer,
                      Options::AESparseProfile());
+    PhaseMetric* kindMetric = &sparseProfile_.otherTransfer;
+    switch (statement->getEdgeKind())
+    {
+    case SVFStmt::Addr:
+        kindMetric = &sparseProfile_.addressTransfer;
+        break;
+    case SVFStmt::Copy:
+        kindMetric = &sparseProfile_.copyTransfer;
+        break;
+    case SVFStmt::Gep:
+        kindMetric = &sparseProfile_.gepTransfer;
+        break;
+    case SVFStmt::Load:
+        kindMetric = &sparseProfile_.loadTransfer;
+        break;
+    case SVFStmt::Store:
+        kindMetric = &sparseProfile_.storeTransfer;
+        break;
+    default:
+        break;
+    }
+    PhaseTimer kindTimer(*kindMetric, Options::AESparseProfile());
     Base::handleSVFStatement(statement);
 }
 
@@ -146,6 +168,13 @@ void NativeSemiSparseAbstractInterpretation::reportSparseProfile() const
     report("total", sparseProfile_.total);
     report("global-initialization", sparseProfile_.globalInitialization);
     report("statement-transfer", sparseProfile_.statementTransfer);
+    report("transfer-address", sparseProfile_.addressTransfer);
+    report("transfer-copy", sparseProfile_.copyTransfer);
+    report("transfer-gep", sparseProfile_.gepTransfer);
+    report("transfer-load", sparseProfile_.loadTransfer);
+    report("transfer-store", sparseProfile_.storeTransfer);
+    report("transfer-other", sparseProfile_.otherTransfer);
+    report("memory-store", sparseProfile_.memoryStore);
     report("state-copy", sparseProfile_.stateCopy);
     report("state-merge", sparseProfile_.stateMerge);
     report("state-join", sparseProfile_.stateJoin);
@@ -158,6 +187,12 @@ void NativeSemiSparseAbstractInterpretation::reportSparseProfile() const
     report("object-pull", sparseProfile_.objectPull);
     report("path-feasibility", sparseProfile_.pathFeasibility);
     report("memory-refinement", sparseProfile_.memoryRefinement);
+    std::cout << "AE_SPARSE_COUNT mode=" << sparseProfileMode()
+              << " metric=unknown-store-calls value="
+              << sparseProfile_.unknownStoreCalls << '\n';
+    std::cout << "AE_SPARSE_COUNT mode=" << sparseProfileMode()
+              << " metric=unknown-store-cells value="
+              << sparseProfile_.unknownStoreCells << '\n';
     std::cout.flags(previousFlags);
     std::cout.precision(previousPrecision);
 }
@@ -323,6 +358,18 @@ void NativeSemiSparseAbstractInterpretation::storeValue(
     const ValVar* pointer, const AD::Interval& interval,
     const AD::AddressSet& addresses, const ICFGNode* node)
 {
+    PhaseTimer timer(sparseProfile_.memoryStore, Options::AESparseProfile());
+    if (Options::AESparseProfile() && pointer &&
+        this->adapter_.contains(*pointer))
+    {
+        const AD::AddressSet pointees = getAddressSet(pointer, node);
+        if (pointees.isTop())
+        {
+            ++sparseProfile_.unknownStoreCalls;
+            sparseProfile_.unknownStoreCells +=
+                this->ensureState(node).memoryLayout().cells().size();
+        }
+    }
     Base::storeValue(pointer, interval, addresses, node);
     if (pointer && this->adapter_.contains(*pointer))
         this->forgetValue(this->ensureState(node),

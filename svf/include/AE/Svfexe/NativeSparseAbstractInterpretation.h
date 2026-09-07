@@ -45,6 +45,13 @@ protected:
         PhaseMetric total;
         PhaseMetric globalInitialization;
         PhaseMetric statementTransfer;
+        PhaseMetric addressTransfer;
+        PhaseMetric copyTransfer;
+        PhaseMetric gepTransfer;
+        PhaseMetric loadTransfer;
+        PhaseMetric storeTransfer;
+        PhaseMetric otherTransfer;
+        PhaseMetric memoryStore;
         PhaseMetric stateCopy;
         PhaseMetric stateMerge;
         PhaseMetric stateJoin;
@@ -57,6 +64,8 @@ protected:
         PhaseMetric objectPull;
         PhaseMetric pathFeasibility;
         PhaseMetric memoryRefinement;
+        std::uint64_t unknownStoreCalls = 0;
+        std::uint64_t unknownStoreCells = 0;
     };
 
     AbstractDomain::Interval getInterval(const ValVar* var,
