@@ -308,6 +308,38 @@ std::vector<Variable> AddressDomain::nonDefaultVariables() const
     return variables;
 }
 
+std::vector<Variable> AddressDomain::nonDefaultVariablesBefore(
+    Variable upperBound) const
+{
+    std::vector<Variable> variables;
+    if (!paged_)
+    {
+        for (const auto& [variable, value] : *smallValues_)
+        {
+            (void)value;
+            if (variable.id() >= upperBound.id())
+                break;
+            variables.push_back(variable);
+        }
+        return variables;
+    }
+    for (const ValuePageEntry& entry : pages_)
+    {
+        if (entry.index * ValuesPerPage >= upperBound.id())
+            break;
+        for (std::size_t slot = 0; slot < ValuesPerPage; ++slot)
+        {
+            if (!entry.page->values[slot])
+                continue;
+            const Variable variable(static_cast<std::uint32_t>(
+                entry.index * ValuesPerPage + slot));
+            if (variable.id() < upperBound.id())
+                variables.push_back(variable);
+        }
+    }
+    return variables;
+}
+
 void AddressDomain::assign(Variable variable, AddressSet addresses)
 {
     if (bottom_)

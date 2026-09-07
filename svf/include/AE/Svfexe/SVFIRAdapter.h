@@ -34,6 +34,10 @@ public:
     const ObjVar* contentObject(AbstractDomain::Variable variable) const;
     bool isPointer(AbstractDomain::Variable variable) const;
     const ObjVar& object(AbstractDomain::Location location) const;
+    AbstractDomain::Variable firstObjectContentVariable() const
+    {
+        return AbstractDomain::Variable(firstObjectContentVariableId_);
+    }
 
     const AbstractDomain::MemoryLayout& memoryLayout() const
     {
@@ -53,6 +57,7 @@ private:
     mutable AbstractDomain::MemoryLayout memoryLayout_;
     mutable std::uint64_t nextVariableId_ = 1;
     mutable std::uint64_t nextLocationId_ = 1;
+    std::uint32_t firstObjectContentVariableId_ = 1;
 };
 
 } // namespace SVF

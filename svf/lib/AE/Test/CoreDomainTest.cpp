@@ -252,6 +252,8 @@ void testPagedCopyOnWriteAndSerialization()
     BoxDomain sharedPages = BoxDomain::top();
     for (const Variable variable : variables)
         sharedPages.assign(variable, LinearExpression(Rational(5)));
+    require(sharedPages.constrainedVariablesBefore(variables[10]).size() == 10,
+            "bounded Box observation crossed its stable-ID partition");
     BoxDomain identicalJoin = sharedPages;
     identicalJoin.joinWith(sharedPages);
     require(identicalJoin.isEquivalentTo(sharedPages) == CheckResult::True,
@@ -394,6 +396,12 @@ void testAddressDomain()
                 !addresses.addressSet(p).contains(second) &&
                 copy.addressSet(p).contains(second),
             "Address copy-on-write changed the source property");
+    AddressDomain ranged = addresses;
+    ranged.assign(q, AddressSet::singleton(second));
+    const std::vector<Variable> beforeQ =
+        ranged.nonDefaultVariablesBefore(q);
+    require(beforeQ.size() == 1 && beforeQ.front() == p,
+            "bounded Address observation crossed its stable-ID partition");
 
     AddressDomain joined = addresses;
     joined.joinWith(copy);

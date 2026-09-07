@@ -248,11 +248,14 @@ bool NativeSemiSparseAbstractInterpretation::isAbstractStateEquivalent(
 void NativeSemiSparseAbstractInterpretation::forgetActiveScalarValues(
     DenseState& denseState) const
 {
-    for (AD::Variable variable : nonDefaultVariables(denseState))
-    {
-        if (this->adapter_.value(variable))
-            this->forgetValue(denseState, variable);
-    }
+    const AD::Variable contentBegin =
+        this->adapter_.firstObjectContentVariable();
+    for (AD::Variable variable :
+         denseState.numerical().constrainedVariablesBefore(contentBegin))
+        denseState.numerical().forget(variable);
+    for (AD::Variable variable :
+         denseState.addresses().nonDefaultVariablesBefore(contentBegin))
+        denseState.addresses().forget(variable);
 }
 
 void NativeSemiSparseAbstractInterpretation::forgetMemoryValues(

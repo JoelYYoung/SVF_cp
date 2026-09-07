@@ -83,6 +83,10 @@ SVFIRAdapter::SVFIRAdapter(const SVFIR& svfir)
     // also keeps both O(1) reverse-index vectors compact.
     addScalars(false);
     addScalars(true);
+    if (nextVariableId_ > std::numeric_limits<std::uint32_t>::max())
+        throw std::overflow_error("too many abstract-domain scalar variables");
+    firstObjectContentVariableId_ =
+        static_cast<std::uint32_t>(nextVariableId_);
     addObjectContents(false);
     addObjectContents(true);
 }

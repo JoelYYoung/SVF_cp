@@ -578,6 +578,8 @@ public:
     /// stricter than the analysis-wide Top default. This is a storage
     /// observation for sparse scheduling; absence never means undefined.
     std::vector<Variable> constrainedVariables() const;
+    std::vector<Variable> constrainedVariablesBefore(
+        Variable upperBound) const;
     LinearConstraintSet toConstraints() const override;
     void close() override;
     void canonicalize() override;
@@ -636,6 +638,8 @@ private:
     void eraseBound(Variable variable);
     static bool pageIsEmpty(const BoundPage& page);
     std::vector<Variable> boundedVariables() const;
+    std::vector<Variable> boundedVariablesBefore(
+        std::uint32_t upperBound) const;
     void makeBottom();
     void canonicalize(Variable variable);
     void setBound(Variable variable, Interval interval);

@@ -154,6 +154,8 @@ public:
     AddressSet addressSet(Variable variable) const;
     /// Variables with a value different from Address Top.
     std::vector<Variable> nonDefaultVariables() const;
+    std::vector<Variable> nonDefaultVariablesBefore(
+        Variable upperBound) const;
     void assign(Variable variable, AddressSet addresses);
     void forget(Variable variable);
 

@@ -2485,6 +2485,14 @@ std::vector<Variable> BoxDomain::constrainedVariables() const
     return boundedVariables();
 }
 
+std::vector<Variable> BoxDomain::constrainedVariablesBefore(
+    Variable upperBound) const
+{
+    if (bottom_)
+        return {};
+    return boundedVariablesBefore(upperBound.id());
+}
+
 void BoxDomain::expand(Variable source, const std::vector<Variable>& copies)
 {
     std::set<Variable> seen;
@@ -3046,6 +3054,23 @@ std::vector<Variable> BoxDomain::boundedVariables() const
             {
                 variables.push_back(entry.page->bounds[offset]->variable);
             }
+        }
+    }
+    return variables;
+}
+
+std::vector<Variable> BoxDomain::boundedVariablesBefore(
+    std::uint32_t upperBound) const
+{
+    std::vector<Variable> variables;
+    for (const BoundPageEntry& entry : boundPages_)
+    {
+        if (entry.index * BoundsPerPage >= upperBound)
+            break;
+        for (const std::optional<BoundSlot>& slot : entry.page->bounds)
+        {
+            if (slot && slot->variable.id() < upperBound)
+                variables.push_back(slot->variable);
         }
     }
     return variables;
