@@ -1,7 +1,28 @@
 //===- CoreDomainTest.cpp -- Abstract, Box, and Address domain tests ----===//
+//
+//                     SVF: Static Value-Flow Analysis
+//
+// Copyright (C) <2013->  <Yulei Sui>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <http://www.gnu.org/licenses/>.
+//
+// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//
+//===----------------------------------------------------------------------===//
 
 #include "AE/Core/AddressDomain.h"
-#include "AE/Core/BoxProgramState.h"
+#include "AE/Core/BoxAddressDomain.h"
 #include "AE/Core/NumericalDomain.h"
 
 #include <algorithm>
@@ -291,7 +312,7 @@ void testPagedCopyOnWriteAndSerialization()
                   "Box raw deserialization accepted corrupt data");
 }
 
-void testProgramStateMemoryFacet()
+void testBoxAddressDomainMemoryFacet()
 {
     const Variable pointer(1);
     const Variable source(2);
@@ -301,12 +322,12 @@ void testProgramStateMemoryFacet()
     const Location object(10);
     const Location lateObject(20);
     MemoryLayout layout({{object, cell}});
-    BoxProgramState state(BoxDomain::top(), layout);
+    BoxAddressDomain state(BoxDomain::top(), layout);
     require(state.isTop(),
             "empty typed Box program state was not unconstrained");
-    BoxProgramState unreachable(BoxDomain::bottom(),
+    BoxAddressDomain unreachable(BoxDomain::bottom(),
                                 MemoryLayout({{object, cell}}));
-    BoxProgramState firstMerge = unreachable;
+    BoxAddressDomain firstMerge = unreachable;
     firstMerge.joinWith(state);
     require(firstMerge.isEquivalentTo(state) == CheckResult::True &&
                 unreachable.isSubsetOf(state) == CheckResult::True,
@@ -337,9 +358,9 @@ void testProgramStateMemoryFacet()
     require(state.lifetimes().mustBeFreed(lateObject),
             "Box program state did not preserve released-memory status");
 
-    BoxProgramState other = state;
+    BoxAddressDomain other = state;
     other.assignNumeric(source, LinearExpression(Rational(9)));
-    BoxProgramState joined = state;
+    BoxAddressDomain joined = state;
     joined.joinWith(other);
     require(other.isSubsetOf(joined) == CheckResult::True,
             "Box program-state join omitted a component");
@@ -607,7 +628,7 @@ int main()
         testScalarTransferOperations();
         testStableVocabularyExpandFoldAndTrees();
         testPagedCopyOnWriteAndSerialization();
-        testProgramStateMemoryFacet();
+        testBoxAddressDomainMemoryFacet();
         testLifetimeDomain();
         testAddressDomain();
         testAddressDomainDifferential();

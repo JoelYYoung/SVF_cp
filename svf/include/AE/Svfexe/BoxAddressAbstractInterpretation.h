@@ -1,9 +1,30 @@
-//===- DenseAbstractInterpretation.h -- Domain-backed dense AE -*- C++ -*-===//
+//===- BoxAddressAbstractInterpretation.h -- Box/address AE -*- C++ -*-===//
+//
+//                     SVF: Static Value-Flow Analysis
+//
+// Copyright (C) <2013->  <Yulei Sui>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <http://www.gnu.org/licenses/>.
+//
+// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//
+//===----------------------------------------------------------------------===//
 
-#ifndef SVF_AE_DENSE_ABSTRACT_INTERPRETATION_H
-#define SVF_AE_DENSE_ABSTRACT_INTERPRETATION_H
+#ifndef SVF_AE_BOX_ADDRESS_ABSTRACT_INTERPRETATION_H
+#define SVF_AE_BOX_ADDRESS_ABSTRACT_INTERPRETATION_H
 
-#include "AE/Core/BoxProgramState.h"
+#include "AE/Core/BoxAddressDomain.h"
 #include "AE/Core/NumericalDomain.h"
 #include "AE/Svfexe/AbstractInterpretation.h"
 #include "AE/Svfexe/SVFIRAdapter.h"
@@ -11,17 +32,16 @@
 namespace SVF
 {
 
-/// Native dense AE storage backed by one complete AbstractDomain state per
-/// ICFG node. Values, memory, lifetimes, joins, widening, and
-/// fixpoint checks all operate on BoxProgramState; no compatibility trace
-/// is maintained by this implementation.
-class DenseAbstractInterpretation : public AbstractInterpretation
+/// Box/address transfer and state implementation. Its default placement keeps
+/// one complete state per ICFG node; sparse subclasses reuse the same transfer
+/// semantics while overriding where scalar and memory facts are stored.
+class BoxAddressAbstractInterpretation : public AbstractInterpretation
 {
 public:
-    using DenseState = AbstractDomain::BoxProgramState;
+    using State = AbstractDomain::BoxAddressDomain;
 
-    DenseAbstractInterpretation();
-    ~DenseAbstractInterpretation() override = default;
+    BoxAddressAbstractInterpretation();
+    ~BoxAddressAbstractInterpretation() override = default;
     const AbstractDomain::AbstractDomain& getAbstractState(
         const ICFGNode* node) const override;
     bool hasAbsState(const ICFGNode* node) const override;
@@ -114,32 +134,32 @@ protected:
                                 const ICFGNode* successor) override;
 
 protected:
-    DenseState& ensureState(const ICFGNode* node);
-    const DenseState& state(const ICFGNode* node) const;
-    DenseState topState() const;
-    DenseState bottomState() const;
+    State& ensureState(const ICFGNode* node);
+    const State& state(const ICFGNode* node) const;
+    State topState() const;
+    State bottomState() const;
 
-    void assignValue(DenseState& state, AbstractDomain::Variable variable,
+    void assignValue(State& state, AbstractDomain::Variable variable,
                      const AbstractDomain::Interval& interval,
                      const AbstractDomain::AddressSet& addresses);
-    void assignMemoryValue(DenseState& state,
+    void assignMemoryValue(State& state,
                            AbstractDomain::Variable content,
                            const AbstractDomain::Interval& interval,
                            const AbstractDomain::AddressSet& addresses);
-    void assignInterval(DenseState& state, AbstractDomain::Variable variable,
+    void assignInterval(State& state, AbstractDomain::Variable variable,
                         const AbstractDomain::Interval& interval);
-    void constrainInterval(DenseState& state, AbstractDomain::Variable variable,
+    void constrainInterval(State& state, AbstractDomain::Variable variable,
                            const AbstractDomain::Interval& interval);
-    virtual void materializeValue(DenseState& state, const ValVar* value,
+    virtual void materializeValue(State& state, const ValVar* value,
                                   const ICFGNode* node);
-    void forgetValue(DenseState& state,
+    void forgetValue(State& state,
                      AbstractDomain::Variable variable) const;
-    void assumeBranch(const IntraCFGEdge* edge, DenseState& state);
+    void assumeBranch(const IntraCFGEdge* edge, State& state);
 
     SVFIRAdapter adapter_;
-    Map<const ICFGNode*, DenseState> denseTrace_;
+    Map<const ICFGNode*, State> stateTrace_;
 };
 
 } // namespace SVF
 
-#endif // SVF_AE_DENSE_ABSTRACT_INTERPRETATION_H
+#endif // SVF_AE_BOX_ADDRESS_ABSTRACT_INTERPRETATION_H

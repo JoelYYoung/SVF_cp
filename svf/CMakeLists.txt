@@ -3,27 +3,26 @@
 set(ABSTRACT_DOMAIN_CORE_HEADERS
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/AbstractDomain.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/Variable.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/LinearExpression.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/TreeExpression.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/Expression.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/NumericalDomain.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/AddressDomain.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/BoxProgramState.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Core/BoxAddressDomain.h
 )
 set(ABSTRACT_DOMAIN_CORE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/AbstractDomain.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/AddressDomain.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/BoxProgramState.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/LinearExpression.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/BoxAddressDomain.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/Expression.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Core/NumericalDomain.cpp
 )
 set(ABSTRACT_DOMAIN_INTEGRATION_HEADERS
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/DenseAbstractInterpretation.h
-    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/NativeSparseAbstractInterpretation.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/BoxAddressAbstractInterpretation.h
+    ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/SparseAbstractInterpretation.h
     ${CMAKE_CURRENT_LIST_DIR}/include/AE/Svfexe/SVFIRAdapter.h
 )
 set(ABSTRACT_DOMAIN_INTEGRATION_SOURCES
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/DenseAbstractInterpretation.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/NativeSparseAbstractInterpretation.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/BoxAddressAbstractInterpretation.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/SparseAbstractInterpretation.cpp
     ${CMAKE_CURRENT_LIST_DIR}/lib/AE/Svfexe/SVFIRAdapter.cpp
 )
 

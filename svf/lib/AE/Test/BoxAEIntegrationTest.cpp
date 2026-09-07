@@ -1,6 +1,27 @@
 //===- BoxAEIntegrationTest.cpp -- Box-backed AE integration test -------===//
+//
+//                     SVF: Static Value-Flow Analysis
+//
+// Copyright (C) <2013->  <Yulei Sui>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <http://www.gnu.org/licenses/>.
+//
+// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//
+//===----------------------------------------------------------------------===//
 
-#include "AE/Core/BoxProgramState.h"
+#include "AE/Core/BoxAddressDomain.h"
 #include "AE/Core/NumericalDomain.h"
 #include "AE/Svfexe/AbstractInterpretation.h"
 #include "AE/Svfexe/SVFIRAdapter.h"
@@ -24,7 +45,7 @@ using namespace SVF;
 namespace
 {
 namespace AD = SVF::AbstractDomain;
-using BoxProgramState = AD::BoxProgramState;
+using BoxAddressDomain = AD::BoxAddressDomain;
 
 const SVFVar* findValue(const SVFIR& graph, const std::string& name)
 {
@@ -38,19 +59,20 @@ const SVFVar* findValue(const SVFIR& graph, const std::string& name)
     return nullptr;
 }
 
-const BoxProgramState& requireBoxState(const AD::AbstractDomain& state)
+const BoxAddressDomain& requireBoxAddressDomain(
+    const AD::AbstractDomain& state)
 {
-    if (!state.isDomain<BoxProgramState>())
-        throw std::runtime_error("AE property is not Box-backed");
-    return static_cast<const BoxProgramState&>(state);
+    if (!state.isDomain<BoxAddressDomain>())
+        throw std::runtime_error("AE property is not BoxAddressDomain-backed");
+    return static_cast<const BoxAddressDomain&>(state);
 }
 
-const BoxProgramState& stateForValue(AbstractInterpretation& analysis,
+const BoxAddressDomain& stateForValue(AbstractInterpretation& analysis,
                                      const ValVar* value, const ICFGNode* node)
 {
     if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
-        return requireBoxState(*scalar);
-    return requireBoxState(analysis.getAbstractState(node));
+        return requireBoxAddressDomain(*scalar);
+    return requireBoxAddressDomain(analysis.getAbstractState(node));
 }
 
 bool hasFiniteBounds(const AD::Interval& interval, s64_t lower, s64_t upper)
@@ -63,9 +85,9 @@ bool hasFiniteBounds(const AD::Interval& interval, s64_t lower, s64_t upper)
 void validateAuthoritativeStorage(AbstractInterpretation& analysis)
 {
     if (analysis.getAnalyzedNodes().empty())
-        throw std::runtime_error("Box AE analyzed no ICFG nodes");
+        throw std::runtime_error("Box/address AE analyzed no ICFG nodes");
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
-        requireBoxState(analysis.getAbstractState(node));
+        requireBoxAddressDomain(analysis.getAbstractState(node));
 }
 
 struct StorageObservation
@@ -85,7 +107,7 @@ struct StorageObservation
     std::vector<std::size_t> addressFactsPerState;
     std::vector<std::size_t> addressSetSizes;
 
-    void observe(const BoxProgramState& state)
+    void observe(const BoxAddressDomain& state)
     {
         ++states;
         const std::vector<AD::Variable> numerical =
@@ -189,9 +211,9 @@ StorageObservations observeStorage(AbstractInterpretation& analysis)
     StorageObservations observations;
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
         observations.flow.observe(
-            requireBoxState(analysis.getAbstractState(node)));
+            requireBoxAddressDomain(analysis.getAbstractState(node)));
     if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
-        observations.scalar.observe(requireBoxState(*scalar));
+        observations.scalar.observe(requireBoxAddressDomain(*scalar));
     return observations;
 }
 
@@ -542,7 +564,7 @@ ResultChecksum resultChecksum(const SVFIR& graph,
     return {hash, records.size()};
 }
 
-std::string stateShape(const BoxProgramState& state)
+std::string stateShape(const BoxAddressDomain& state)
 {
     if (state.isBottom())
         return "bottom";
@@ -586,10 +608,12 @@ std::uint64_t semanticShapeChecksum(AbstractInterpretation& analysis)
     shapes.reserve(analysis.getAnalyzedNodes().size());
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
         shapes.push_back(
-            stateShape(requireBoxState(analysis.getAbstractState(node))));
+            stateShape(
+                requireBoxAddressDomain(analysis.getAbstractState(node))));
     std::sort(shapes.begin(), shapes.end());
     if (const AD::AbstractDomain* scalar = analysis.getScalarAbstractState())
-        shapes.push_back("scalar:" + stateShape(requireBoxState(*scalar)));
+        shapes.push_back("scalar:" +
+                         stateShape(requireBoxAddressDomain(*scalar)));
 
     std::uint64_t hash = offset;
     for (const std::string& shape : shapes)
@@ -667,7 +691,7 @@ void validateProjection(const SVFIR& graph, AbstractInterpretation& analysis)
         if (!analysis.hasAbsValue(scalar, node))
             continue;
         const AD::Interval projected = analysis.getInterval(scalar, node);
-        const BoxProgramState& state = stateForValue(analysis, scalar, node);
+        const BoxAddressDomain& state = stateForValue(analysis, scalar, node);
         lastProjection = projected.toString();
         const AD::Interval stored = state.numerical().bound(variable);
         lastStored = stored.toString();

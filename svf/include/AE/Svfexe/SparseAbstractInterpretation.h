@@ -1,13 +1,34 @@
-//===- NativeSparseAbstractInterpretation.h -- Domain sparse AE -*- C++ -*-===//
+//===- SparseAbstractInterpretation.h -- Sparse box/address AE -*- C++ -*-===//
+//
+//                     SVF: Static Value-Flow Analysis
+//
+// Copyright (C) <2013->  <Yulei Sui>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <http://www.gnu.org/licenses/>.
+//
+// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//
+//===----------------------------------------------------------------------===//
 
-#ifndef SVF_AE_NATIVE_SPARSE_ABSTRACT_INTERPRETATION_H
-#define SVF_AE_NATIVE_SPARSE_ABSTRACT_INTERPRETATION_H
+#ifndef SVF_AE_SPARSE_ABSTRACT_INTERPRETATION_H
+#define SVF_AE_SPARSE_ABSTRACT_INTERPRETATION_H
 
 #include <cstdint>
 #include <memory>
 #include <optional>
 
-#include "AE/Svfexe/DenseAbstractInterpretation.h"
+#include "AE/Svfexe/BoxAddressAbstractInterpretation.h"
 
 namespace SVF
 {
@@ -16,18 +37,18 @@ class IndirectSVFGEdge;
 class SVFGBuilder;
 class VFGNode;
 
-/// Semi-sparse AE backed by BoxProgramState. Box values use one module-wide
+/// Semi-sparse AE backed by BoxAddressDomain. Box values use one module-wide
 /// scalar carrier. Persistent ICFG states carry memory and lifetime values,
 /// while transfers materialize scalar operands only temporarily.
-class NativeSemiSparseAbstractInterpretation
-    : public DenseAbstractInterpretation
+class SemiSparseAbstractInterpretation
+    : public BoxAddressAbstractInterpretation
 {
 public:
-    using Base = DenseAbstractInterpretation;
-    using DenseState = typename Base::DenseState;
+    using Base = BoxAddressAbstractInterpretation;
+    using State = typename Base::State;
 
-    NativeSemiSparseAbstractInterpretation();
-    ~NativeSemiSparseAbstractInterpretation() override = default;
+    SemiSparseAbstractInterpretation();
+    ~SemiSparseAbstractInterpretation() override = default;
     void runOnModule() override;
     const AbstractDomain::AbstractDomain* getScalarAbstractState()
         const override;
@@ -101,7 +122,7 @@ protected:
                           const AbstractDomain::AbstractDomain& current,
                           const ICFGCycleWTO* cycle) override;
 
-    void materializeValue(DenseState& state, const ValVar* value,
+    void materializeValue(State& state, const ValVar* value,
                           const ICFGNode* node) override;
     void loadValue(const ValVar* pointer, AbstractDomain::Interval& interval,
                    AbstractDomain::AddressSet& addresses,
@@ -113,42 +134,42 @@ protected:
 
     /// Keep only the state facets that should flow along ordinary ICFG
     /// edges. Full-sparse overrides this to remove MemorySSA-managed objects.
-    virtual void filterPropagatedState(DenseState& state) const;
+    virtual void filterPropagatedState(State& state) const;
 
     /// Optional memory refinement hook after a conditional edge has been
     /// proven feasible by the native numerical state.
     virtual void collectMemoryBranchRefinement(const IntraCFGEdge* edge,
-                                               DenseState& state);
+                                               State& state);
 
-    DenseState& scalarState();
-    const DenseState* findScalarState() const;
-    DenseState flowState(bool bottom = false) const;
-    void forgetActiveScalarValues(DenseState& state) const;
-    void forgetMemoryValues(DenseState& state) const;
-    void applyScalarRefinement(DenseState& state, const DenseState& checkpoint);
-    void scatterCycleValues(const ICFGCycleWTO* cycle, const DenseState& state);
+    State& scalarState();
+    const State* findScalarState() const;
+    State flowState(bool bottom = false) const;
+    void forgetActiveScalarValues(State& state) const;
+    void forgetMemoryValues(State& state) const;
+    void applyScalarRefinement(State& state, const State& checkpoint);
+    void scatterCycleValues(const ICFGCycleWTO* cycle, const State& state);
     virtual const char* sparseProfileMode() const;
     void reportSparseProfile() const;
 
-    Map<const ICFGNode*, DenseState> refinementTrace_;
-    std::optional<DenseState> scalarState_;
+    Map<const ICFGNode*, State> refinementTrace_;
+    std::optional<State> scalarState_;
     mutable SparsePhaseProfile sparseProfile_;
 };
 
-/// Full-sparse AE backed by BoxProgramState. Scalar SSA values remain at
+/// Full-sparse AE backed by BoxAddressDomain. Scalar SSA values remain at
 /// definition sites as in semi-sparse mode. Base/Dummy ObjVar contents move
 /// along MemorySSA/SVFG def-use edges; GepObjVar snapshots and lifetime facts
 /// continue to flow along the ICFG because they are not fully represented by
 /// those edges.
-class NativeFullSparseAbstractInterpretation
-    : public NativeSemiSparseAbstractInterpretation
+class FullSparseAbstractInterpretation
+    : public SemiSparseAbstractInterpretation
 {
 public:
-    using Base = NativeSemiSparseAbstractInterpretation;
-    using DenseState = typename Base::DenseState;
+    using Base = SemiSparseAbstractInterpretation;
+    using State = typename Base::State;
 
-    NativeFullSparseAbstractInterpretation();
-    ~NativeFullSparseAbstractInterpretation() override;
+    FullSparseAbstractInterpretation();
+    ~FullSparseAbstractInterpretation() override;
 
 protected:
     bool mergeStatesFromPredecessors(const ICFGNode* node) override;
@@ -156,9 +177,9 @@ protected:
                     const AbstractDomain::Interval& interval,
                     const AbstractDomain::AddressSet& addresses,
                     const ICFGNode* node) override;
-    void filterPropagatedState(DenseState& state) const override;
+    void filterPropagatedState(State& state) const override;
     void collectMemoryBranchRefinement(const IntraCFGEdge* edge,
-                                       DenseState& state) override;
+                                       State& state) override;
     void recordBranchRefinement(NodeID objectId,
                                 const AbstractDomain::Interval& narrowed,
                                 AbstractDomain::AbstractDomain& state,
@@ -181,4 +202,4 @@ private:
 
 } // namespace SVF
 
-#endif // SVF_AE_NATIVE_SPARSE_ABSTRACT_INTERPRETATION_H
+#endif // SVF_AE_SPARSE_ABSTRACT_INTERPRETATION_H

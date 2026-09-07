@@ -23,13 +23,13 @@
 
 //
 //  Created on: Jan 10, 2024
-//      Author: Xiao Cheng, Jiawei Wang
+//      Author: Xiao Cheng, Jiawei Wang, Jiawei Yang
 //
 
 #include "AE/Svfexe/AbstractInterpretation.h"
 #include "AE/Svfexe/AbsExtAPI.h"
-#include "AE/Svfexe/DenseAbstractInterpretation.h"
-#include "AE/Svfexe/NativeSparseAbstractInterpretation.h"
+#include "AE/Svfexe/BoxAddressAbstractInterpretation.h"
+#include "AE/Svfexe/SparseAbstractInterpretation.h"
 #include "Graphs/CallGraph.h"
 #include "SVFIR/SVFIR.h"
 #include "Util/Options.h"
@@ -85,12 +85,12 @@ AbstractInterpretation& AbstractInterpretation::getAEInstance()
         switch (Options::AESparsity())
         {
         case AESparsity::SemiSparse:
-            return new NativeSemiSparseAbstractInterpretation();
+            return new SemiSparseAbstractInterpretation();
         case AESparsity::Sparse:
-            return new NativeFullSparseAbstractInterpretation();
+            return new FullSparseAbstractInterpretation();
         case AESparsity::Dense:
         default:
-            return new DenseAbstractInterpretation();
+            return new BoxAddressAbstractInterpretation();
         }
     }();
     return *instance;

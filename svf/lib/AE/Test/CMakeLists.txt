@@ -15,8 +15,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     AbstractDomainCore
     ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/AbstractDomain.cpp
     ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/AddressDomain.cpp
-    ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/LinearExpression.cpp
-    ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/BoxProgramState.cpp
+    ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/Expression.cpp
+    ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/BoxAddressDomain.cpp
     ${ABSTRACT_DOMAIN_SOURCE_ROOT}/lib/AE/Core/NumericalDomain.cpp
   )
   target_compile_features(AbstractDomainCore PUBLIC cxx_std_17)

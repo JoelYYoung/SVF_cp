@@ -21,7 +21,7 @@ operation-level regression checks.
 | Configuration | Revision | Semi-Sparse carrier |
 |---|---|---|
 | Legacy | `40d8de3f` | legacy `IntervalState` plus compatibility trace |
-| Box | `562c5cbc` | `BoxProgramState`, global scalar carrier and ICFG memory carrier |
+| Box | `562c5cbc` | `BoxAddressDomain`, global scalar carrier and ICFG memory carrier |
 
 Both revisions were built separately with Homebrew Clang 21.1.8, C++17,
 `Release`, assertions off and LTO off. Both use their own generated `extapi.bc`.

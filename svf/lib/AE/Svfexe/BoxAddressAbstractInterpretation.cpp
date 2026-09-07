@@ -1,6 +1,27 @@
-//===- DenseAbstractInterpretation.cpp -- Domain-backed dense AE --------===//
+//===- BoxAddressAbstractInterpretation.cpp -- Box/address AE ----------===//
+//
+//                     SVF: Static Value-Flow Analysis
+//
+// Copyright (C) <2013->  <Yulei Sui>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <http://www.gnu.org/licenses/>.
+//
+// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//
+//===----------------------------------------------------------------------===//
 
-#include "AE/Svfexe/DenseAbstractInterpretation.h"
+#include "AE/Svfexe/BoxAddressAbstractInterpretation.h"
 
 #include "SVFIR/SVFIR.h"
 #include "Util/Options.h"
@@ -83,12 +104,12 @@ bool constraintKind(u32_t predicate, AD::ConstraintKind& kind)
 
 } // namespace
 
-DenseAbstractInterpretation::DenseAbstractInterpretation() : adapter_(*svfir) {}
+BoxAddressAbstractInterpretation::BoxAddressAbstractInterpretation() : adapter_(*svfir) {}
 
-void DenseAbstractInterpretation::handleGlobalNode()
+void BoxAddressAbstractInterpretation::handleGlobalNode()
 {
     const ICFGNode* node = icfg->getGlobalICFGNode();
-    denseTrace_.insert_or_assign(node, topState());
+    stateTrace_.insert_or_assign(node, topState());
     for (const SVFStmt* statement : node->getSVFStmts())
         handleSVFStatement(statement);
 
@@ -97,13 +118,13 @@ void DenseAbstractInterpretation::handleGlobalNode()
         updateValue(variable, AD::Interval::top(), AD::AddressSet::top(), node);
 }
 
-void DenseAbstractInterpretation::initializeObjectValue(
+void BoxAddressAbstractInterpretation::initializeObjectValue(
     const ObjVar* object, AD::Interval& interval, AD::AddressSet& addresses,
     const ICFGNode* node)
 {
     interval = AD::Interval::bottom();
     addresses = AD::AddressSet::bottom();
-    DenseState& denseState = ensureState(node);
+    State& denseState = ensureState(node);
     denseState.allocate(adapter_.location(*object));
 
     const BaseObjVar* base = PAG::getPAG()->getBaseObject(object->getId());
@@ -127,111 +148,111 @@ void DenseAbstractInterpretation::initializeObjectValue(
     addresses = AD::AddressSet::singleton(adapter_.location(*object));
 }
 
-const AbstractDomain::AbstractDomain& DenseAbstractInterpretation::
+const AbstractDomain::AbstractDomain& BoxAddressAbstractInterpretation::
     getAbstractState(const ICFGNode* node) const
 {
     return state(node);
 }
 
-bool DenseAbstractInterpretation::hasAbsState(const ICFGNode* node) const
+bool BoxAddressAbstractInterpretation::hasAbsState(const ICFGNode* node) const
 {
-    return denseTrace_.count(node) != 0;
+    return stateTrace_.count(node) != 0;
 }
 
-AD::Location DenseAbstractInterpretation::locationOf(const ObjVar* object) const
+AD::Location BoxAddressAbstractInterpretation::locationOf(const ObjVar* object) const
 {
     return object ? adapter_.location(*object) : AD::Location::null();
 }
 
-const ObjVar* DenseAbstractInterpretation::objectAt(AD::Location location) const
+const ObjVar* BoxAddressAbstractInterpretation::objectAt(AD::Location location) const
 {
     return location.isNull() ? nullptr : &adapter_.object(location);
 }
 
-DenseAbstractInterpretation::DenseState DenseAbstractInterpretation::topState()
+BoxAddressAbstractInterpretation::State BoxAddressAbstractInterpretation::topState()
     const
 {
-    return DenseState(AD::BoxDomain::top(), adapter_.memoryLayout());
+    return State(AD::BoxDomain::top(), adapter_.memoryLayout());
 }
 
-DenseAbstractInterpretation::DenseState DenseAbstractInterpretation::
+BoxAddressAbstractInterpretation::State BoxAddressAbstractInterpretation::
     bottomState() const
 {
-    return DenseState(AD::BoxDomain::bottom(), adapter_.memoryLayout());
+    return State(AD::BoxDomain::bottom(), adapter_.memoryLayout());
 }
 
-DenseAbstractInterpretation::DenseState& DenseAbstractInterpretation::
+BoxAddressAbstractInterpretation::State& BoxAddressAbstractInterpretation::
     ensureState(const ICFGNode* node)
 {
-    auto iterator = denseTrace_.find(node);
-    if (iterator == denseTrace_.end())
-        iterator = denseTrace_.emplace(node, topState()).first;
+    auto iterator = stateTrace_.find(node);
+    if (iterator == stateTrace_.end())
+        iterator = stateTrace_.emplace(node, topState()).first;
     return iterator->second;
 }
 
-const DenseAbstractInterpretation::DenseState& DenseAbstractInterpretation::
+const BoxAddressAbstractInterpretation::State& BoxAddressAbstractInterpretation::
     state(const ICFGNode* node) const
 {
-    const auto iterator = denseTrace_.find(node);
-    if (iterator == denseTrace_.end())
+    const auto iterator = stateTrace_.find(node);
+    if (iterator == stateTrace_.end())
         throw std::out_of_range("no dense abstract state for ICFG node");
     return iterator->second;
 }
 
-void DenseAbstractInterpretation::resetAbstractState(const ICFGNode* node)
+void BoxAddressAbstractInterpretation::resetAbstractState(const ICFGNode* node)
 {
-    denseTrace_.insert_or_assign(node, topState());
+    stateTrace_.insert_or_assign(node, topState());
 }
 
-void DenseAbstractInterpretation::copyAbstractState(const ICFGNode* source,
+void BoxAddressAbstractInterpretation::copyAbstractState(const ICFGNode* source,
                                                     const ICFGNode* destination)
 {
-    denseTrace_.insert_or_assign(destination, state(source));
+    stateTrace_.insert_or_assign(destination, state(source));
 }
 
-std::unique_ptr<AbstractDomain::AbstractDomain> DenseAbstractInterpretation::
+std::unique_ptr<AbstractDomain::AbstractDomain> BoxAddressAbstractInterpretation::
     cloneAbstractState(const ICFGNode* node) const
 {
     return state(node).clone();
 }
 
-bool DenseAbstractInterpretation::isAbstractStateEquivalent(
+bool BoxAddressAbstractInterpretation::isAbstractStateEquivalent(
     const ICFGNode* node, const AbstractDomain::AbstractDomain& snapshot) const
 {
     return state(node).isEquivalentTo(snapshot) ==
            AbstractDomain::CheckResult::True;
 }
 
-std::unique_ptr<AbstractDomain::AbstractDomain> DenseAbstractInterpretation::
+std::unique_ptr<AbstractDomain::AbstractDomain> BoxAddressAbstractInterpretation::
     cloneCycleHeadState(const ICFGCycleWTO* cycle)
 {
     return cloneAbstractState(cycle->head()->getICFGNode());
 }
 
-bool DenseAbstractInterpretation::widenCycleState(
+bool BoxAddressAbstractInterpretation::widenCycleState(
     const AbstractDomain::AbstractDomain& previous,
     const AbstractDomain::AbstractDomain& current, const ICFGCycleWTO* cycle)
 {
-    const DenseState& previousDense = static_cast<const DenseState&>(previous);
-    const DenseState& currentDense = static_cast<const DenseState&>(current);
-    DenseState next = previousDense;
+    const State& previousDense = static_cast<const State&>(previous);
+    const State& currentDense = static_cast<const State&>(current);
+    State next = previousDense;
     next.widenWith(currentDense);
     const bool fixpoint =
         next.isEquivalentTo(previousDense) == AbstractDomain::CheckResult::True;
     const ICFGNode* head = cycle->head()->getICFGNode();
-    denseTrace_.insert_or_assign(head, std::move(next));
+    stateTrace_.insert_or_assign(head, std::move(next));
     return fixpoint;
 }
 
-bool DenseAbstractInterpretation::narrowCycleState(
+bool BoxAddressAbstractInterpretation::narrowCycleState(
     const AbstractDomain::AbstractDomain& previous,
     const AbstractDomain::AbstractDomain& current, const ICFGCycleWTO* cycle)
 {
     const ICFGNode* head = cycle->head()->getICFGNode();
     if (!shouldApplyNarrowing(head->getFun()))
         return true;
-    const DenseState& previousDense = static_cast<const DenseState&>(previous);
-    DenseState currentDense = static_cast<const DenseState&>(current);
+    const State& previousDense = static_cast<const State&>(previous);
+    State currentDense = static_cast<const State&>(current);
     // Sparse transfers may materialize a new MemorySSA/cycle facet during the
     // descending phase. Enforce narrowing's generic next <= current contract.
     // The normal descending path already satisfies that contract. Avoid
@@ -240,16 +261,16 @@ bool DenseAbstractInterpretation::narrowCycleState(
     // the original conservative meet.
     if (currentDense.isSubsetOf(previousDense) != AD::CheckResult::True)
         currentDense.meetWith(previousDense);
-    DenseState next = previousDense;
+    State next = previousDense;
     next.narrowWith(currentDense);
     const bool fixpoint =
         next.isEquivalentTo(previousDense) == AbstractDomain::CheckResult::True;
     if (!fixpoint)
-        denseTrace_.insert_or_assign(head, std::move(next));
+        stateTrace_.insert_or_assign(head, std::move(next));
     return fixpoint;
 }
 
-void DenseAbstractInterpretation::assignInterval(DenseState& denseState,
+void BoxAddressAbstractInterpretation::assignInterval(State& denseState,
                                                  AD::Variable variable,
                                                  const AD::Interval& interval)
 {
@@ -267,8 +288,8 @@ void DenseAbstractInterpretation::assignInterval(DenseState& denseState,
     constrainInterval(denseState, variable, interval);
 }
 
-void DenseAbstractInterpretation::constrainInterval(
-    DenseState& denseState, AD::Variable variable, const AD::Interval& interval)
+void BoxAddressAbstractInterpretation::constrainInterval(
+    State& denseState, AD::Variable variable, const AD::Interval& interval)
 {
     if (interval.isBottom())
         return;
@@ -292,7 +313,7 @@ void DenseAbstractInterpretation::constrainInterval(
     denseState.numerical().assumeAll(constraints);
 }
 
-void DenseAbstractInterpretation::assignValue(DenseState& denseState,
+void BoxAddressAbstractInterpretation::assignValue(State& denseState,
                                               AD::Variable variable,
                                               const AD::Interval& interval,
                                               const AD::AddressSet& addresses)
@@ -311,8 +332,8 @@ void DenseAbstractInterpretation::assignValue(DenseState& denseState,
     denseState.addresses().forget(variable);
 }
 
-void DenseAbstractInterpretation::assignMemoryValue(
-    DenseState& denseState, AD::Variable content,
+void BoxAddressAbstractInterpretation::assignMemoryValue(
+    State& denseState, AD::Variable content,
     const AD::Interval& interval, const AD::AddressSet& addresses)
 {
     if (interval.isBottom())
@@ -325,19 +346,19 @@ void DenseAbstractInterpretation::assignMemoryValue(
         denseState.addresses().assign(content, addresses);
 }
 
-void DenseAbstractInterpretation::materializeValue(DenseState&, const ValVar*,
+void BoxAddressAbstractInterpretation::materializeValue(State&, const ValVar*,
                                                    const ICFGNode*)
 {
 }
 
-void DenseAbstractInterpretation::forgetValue(DenseState& denseState,
+void BoxAddressAbstractInterpretation::forgetValue(State& denseState,
                                               AD::Variable variable) const
 {
     denseState.numerical().forget(variable);
     denseState.addresses().forget(variable);
 }
 
-AD::Interval DenseAbstractInterpretation::getInterval(const ValVar* var,
+AD::Interval BoxAddressAbstractInterpretation::getInterval(const ValVar* var,
                                                       const ICFGNode* node)
 {
     if (const auto* integer = SVFUtil::dyn_cast<ConstIntValVar>(var))
@@ -345,22 +366,22 @@ AD::Interval DenseAbstractInterpretation::getInterval(const ValVar* var,
     if (!adapter_.contains(*var))
         return AD::Interval::top();
 
-    const DenseState& denseState = ensureState(node);
+    const State& denseState = ensureState(node);
     const AD::Variable variable = adapter_.variable(*var);
     if (var->isPointer())
         return AD::Interval::bottom();
     return denseState.numerical().bound(variable);
 }
 
-AD::Interval DenseAbstractInterpretation::getInterval(const ObjVar* var,
+AD::Interval BoxAddressAbstractInterpretation::getInterval(const ObjVar* var,
                                                       const ICFGNode* node)
 {
-    const DenseState& denseState = ensureState(node);
+    const State& denseState = ensureState(node);
     const AD::Variable content = adapter_.contentVariable(*var);
     return denseState.numerical().bound(content);
 }
 
-AD::Interval DenseAbstractInterpretation::getInterval(const SVFVar* var,
+AD::Interval BoxAddressAbstractInterpretation::getInterval(const SVFVar* var,
                                                       const ICFGNode* node)
 {
     if (const auto* object = SVFUtil::dyn_cast<ObjVar>(var))
@@ -370,27 +391,27 @@ AD::Interval DenseAbstractInterpretation::getInterval(const SVFVar* var,
     throw std::invalid_argument("unsupported SVF variable kind");
 }
 
-AD::AddressSet DenseAbstractInterpretation::getAddressSet(const ValVar* var,
+AD::AddressSet BoxAddressAbstractInterpretation::getAddressSet(const ValVar* var,
                                                           const ICFGNode* node)
 {
     if (!adapter_.contains(*var))
         return AD::AddressSet::top();
     if (!var->isPointer())
         return AD::AddressSet::bottom();
-    const DenseState& denseState = ensureState(node);
+    const State& denseState = ensureState(node);
     const AD::Variable variable = adapter_.variable(*var);
     return denseState.addresses().addressSet(variable);
 }
 
-AD::AddressSet DenseAbstractInterpretation::getAddressSet(const ObjVar* var,
+AD::AddressSet BoxAddressAbstractInterpretation::getAddressSet(const ObjVar* var,
                                                           const ICFGNode* node)
 {
-    const DenseState& denseState = ensureState(node);
+    const State& denseState = ensureState(node);
     const AD::Variable content = adapter_.contentVariable(*var);
     return denseState.addresses().addressSet(content);
 }
 
-AD::AddressSet DenseAbstractInterpretation::getAddressSet(const SVFVar* var,
+AD::AddressSet BoxAddressAbstractInterpretation::getAddressSet(const SVFVar* var,
                                                           const ICFGNode* node)
 {
     if (const auto* object = SVFUtil::dyn_cast<ObjVar>(var))
@@ -400,22 +421,22 @@ AD::AddressSet DenseAbstractInterpretation::getAddressSet(const SVFVar* var,
     throw std::invalid_argument("unsupported SVF variable kind");
 }
 
-bool DenseAbstractInterpretation::hasAbsValue(const ValVar* var,
+bool BoxAddressAbstractInterpretation::hasAbsValue(const ValVar* var,
                                               const ICFGNode* node) const
 {
     if (SVFUtil::isa<ConstIntValVar>(var))
         return true;
-    return denseTrace_.count(node) != 0 && adapter_.contains(*var);
+    return stateTrace_.count(node) != 0 && adapter_.contains(*var);
 }
 
-bool DenseAbstractInterpretation::hasAbsValue(const ObjVar* var,
+bool BoxAddressAbstractInterpretation::hasAbsValue(const ObjVar* var,
                                               const ICFGNode* node) const
 {
     (void)var;
-    return denseTrace_.count(node) != 0;
+    return stateTrace_.count(node) != 0;
 }
 
-bool DenseAbstractInterpretation::hasAbsValue(const SVFVar* var,
+bool BoxAddressAbstractInterpretation::hasAbsValue(const SVFVar* var,
                                               const ICFGNode* node) const
 {
     if (const auto* object = SVFUtil::dyn_cast<ObjVar>(var))
@@ -425,7 +446,7 @@ bool DenseAbstractInterpretation::hasAbsValue(const SVFVar* var,
     return false;
 }
 
-void DenseAbstractInterpretation::updateValue(const ValVar* var,
+void BoxAddressAbstractInterpretation::updateValue(const ValVar* var,
                                               const AD::Interval& interval,
                                               const AD::AddressSet& addresses,
                                               const ICFGNode* node)
@@ -435,7 +456,7 @@ void DenseAbstractInterpretation::updateValue(const ValVar* var,
                     addresses);
 }
 
-void DenseAbstractInterpretation::updateValue(const ObjVar* var,
+void BoxAddressAbstractInterpretation::updateValue(const ObjVar* var,
                                               const AD::Interval& interval,
                                               const AD::AddressSet& addresses,
                                               const ICFGNode* node)
@@ -444,7 +465,7 @@ void DenseAbstractInterpretation::updateValue(const ObjVar* var,
                       interval, addresses);
 }
 
-AD::Interval DenseAbstractInterpretation::getMemoryInterval(
+AD::Interval BoxAddressAbstractInterpretation::getMemoryInterval(
     AD::Location location, const ICFGNode* node)
 {
     if (location.isNull())
@@ -452,7 +473,7 @@ AD::Interval DenseAbstractInterpretation::getMemoryInterval(
     return getInterval(&adapter_.object(location), node);
 }
 
-AD::AddressSet DenseAbstractInterpretation::getMemoryAddressSet(
+AD::AddressSet BoxAddressAbstractInterpretation::getMemoryAddressSet(
     AD::Location location, const ICFGNode* node)
 {
     if (location.isNull())
@@ -460,13 +481,13 @@ AD::AddressSet DenseAbstractInterpretation::getMemoryAddressSet(
     return getAddressSet(&adapter_.object(location), node);
 }
 
-bool DenseAbstractInterpretation::hasMemoryValue(AD::Location location,
+bool BoxAddressAbstractInterpretation::hasMemoryValue(AD::Location location,
                                                  const ICFGNode* node) const
 {
     return !location.isNull() && hasAbsValue(&adapter_.object(location), node);
 }
 
-void DenseAbstractInterpretation::updateMemoryValue(
+void BoxAddressAbstractInterpretation::updateMemoryValue(
     AD::Location location, const AD::Interval& interval,
     const AD::AddressSet& addresses, const ICFGNode* node)
 {
@@ -474,22 +495,22 @@ void DenseAbstractInterpretation::updateMemoryValue(
         updateValue(&adapter_.object(location), interval, addresses, node);
 }
 
-void DenseAbstractInterpretation::markFreedMemory(AD::Location location,
+void BoxAddressAbstractInterpretation::markFreedMemory(AD::Location location,
                                                   const ICFGNode* node)
 {
     if (!location.isNull())
         ensureState(node).lifetimes().release(location);
 }
 
-bool DenseAbstractInterpretation::isFreedMemory(AD::Location location,
+bool BoxAddressAbstractInterpretation::isFreedMemory(AD::Location location,
                                                 const ICFGNode* node) const
 {
-    if (denseTrace_.count(node) == 0 || location.isNull())
+    if (stateTrace_.count(node) == 0 || location.isNull())
         return false;
     return state(node).lifetimes().mayBeFreed(location);
 }
 
-void DenseAbstractInterpretation::updateValue(const SVFVar* var,
+void BoxAddressAbstractInterpretation::updateValue(const SVFVar* var,
                                               const AD::Interval& interval,
                                               const AD::AddressSet& addresses,
                                               const ICFGNode* node)
@@ -502,7 +523,7 @@ void DenseAbstractInterpretation::updateValue(const SVFVar* var,
         throw std::invalid_argument("unsupported SVF variable kind");
 }
 
-void DenseAbstractInterpretation::loadValue(const ValVar* pointer,
+void BoxAddressAbstractInterpretation::loadValue(const ValVar* pointer,
                                             AD::Interval& interval,
                                             AD::AddressSet& addresses,
                                             const ICFGNode* node)
@@ -512,7 +533,7 @@ void DenseAbstractInterpretation::loadValue(const ValVar* pointer,
         AbstractInterpretation::loadValue(pointer, interval, addresses, node);
         return;
     }
-    DenseState& denseState = ensureState(node);
+    State& denseState = ensureState(node);
     materializeValue(denseState, pointer, node);
     const AD::AddressSet pointees = getAddressSet(pointer, node);
     if (pointees.isTop())
@@ -543,7 +564,7 @@ void DenseAbstractInterpretation::loadValue(const ValVar* pointer,
     }
 }
 
-void DenseAbstractInterpretation::storeValue(const ValVar* pointer,
+void BoxAddressAbstractInterpretation::storeValue(const ValVar* pointer,
                                              const AD::Interval& interval,
                                              const AD::AddressSet& addresses,
                                              const ICFGNode* node)
@@ -553,7 +574,7 @@ void DenseAbstractInterpretation::storeValue(const ValVar* pointer,
         AbstractInterpretation::storeValue(pointer, interval, addresses, node);
         return;
     }
-    DenseState& denseState = ensureState(node);
+    State& denseState = ensureState(node);
     materializeValue(denseState, pointer, node);
     const AD::AddressSet pointees = getAddressSet(pointer, node);
     const bool strong = pointees.isSingleton();
@@ -594,8 +615,8 @@ void DenseAbstractInterpretation::storeValue(const ValVar* pointer,
     }
 }
 
-void DenseAbstractInterpretation::assumeBranch(const IntraCFGEdge* edge,
-                                               DenseState& denseState)
+void BoxAddressAbstractInterpretation::assumeBranch(const IntraCFGEdge* edge,
+                                               State& denseState)
 {
     const SVFVar* condition = edge->getCondition();
     if (!condition || condition->getInEdges().empty())
@@ -644,16 +665,16 @@ void DenseAbstractInterpretation::assumeBranch(const IntraCFGEdge* edge,
     denseState.assume(AD::LinearConstraint(lhs - rhs, kind));
 }
 
-bool DenseAbstractInterpretation::mergeStatesFromPredecessors(
+bool BoxAddressAbstractInterpretation::mergeStatesFromPredecessors(
     const ICFGNode* node)
 {
-    DenseState merged = bottomState();
+    State merged = bottomState();
     bool hasFeasiblePredecessor = false;
 
     for (const ICFGEdge* edge : orderedIncomingEdges(node))
     {
         const ICFGNode* predecessor = edge->getSrcNode();
-        if (denseTrace_.count(predecessor) == 0)
+        if (stateTrace_.count(predecessor) == 0)
             continue;
 
         bool shouldMerge = false;
@@ -672,13 +693,13 @@ bool DenseAbstractInterpretation::mergeStatesFromPredecessors(
                 const auto* returnSite = SVFUtil::dyn_cast<RetICFGNode>(node);
                 shouldMerge =
                     returnSite &&
-                    denseTrace_.count(returnSite->getCallICFGNode()) != 0;
+                    stateTrace_.count(returnSite->getCallICFGNode()) != 0;
             }
         }
         if (!shouldMerge)
             continue;
 
-        DenseState source = state(predecessor);
+        State source = state(predecessor);
         if (conditional && conditional->getCondition())
         {
             assumeBranch(conditional, source);
@@ -693,11 +714,11 @@ bool DenseAbstractInterpretation::mergeStatesFromPredecessors(
 
     if (!hasFeasiblePredecessor)
         return false;
-    denseTrace_.insert_or_assign(node, std::move(merged));
+    stateTrace_.insert_or_assign(node, std::move(merged));
     return true;
 }
 
-void DenseAbstractInterpretation::recordBranchRefinement(
+void BoxAddressAbstractInterpretation::recordBranchRefinement(
     NodeID objectId, const AD::Interval& narrowed,
     AD::AbstractDomain& abstractState, const ICFGNode*, const ICFGNode*)
 {
@@ -705,7 +726,7 @@ void DenseAbstractInterpretation::recordBranchRefinement(
     if (!object)
         return;
 
-    DenseState& denseState = static_cast<DenseState&>(abstractState);
+    State& denseState = static_cast<State&>(abstractState);
     const AD::Variable content = adapter_.contentVariable(*object);
     if (object->isPointer())
         return;
@@ -714,10 +735,10 @@ void DenseAbstractInterpretation::recordBranchRefinement(
     assignInterval(denseState, content, refined);
 }
 
-bool DenseAbstractInterpretation::isBranchEdgeFeasibleAt(
+bool BoxAddressAbstractInterpretation::isBranchEdgeFeasibleAt(
     const IntraCFGEdge* edge, const ICFGNode* predecessor)
 {
-    DenseState candidate = state(predecessor);
+    State candidate = state(predecessor);
     assumeBranch(edge, candidate);
     return !candidate.isBottom();
 }

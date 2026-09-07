@@ -1,13 +1,33 @@
-//===- BoxProgramState.h -- Complete Box AE state --------*- C++ -*-===//
+//===- BoxAddressDomain.h -- Box/address reduced product ------*- C++ -*-===//
+//
+//                     SVF: Static Value-Flow Analysis
+//
+// Copyright (C) <2013->  <Yulei Sui>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program. If not, see <http://www.gnu.org/licenses/>.
+//
+// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//
+//===----------------------------------------------------------------------===//
 
-#ifndef SVF_AE_BOX_PROGRAM_STATE_H
-#define SVF_AE_BOX_PROGRAM_STATE_H
+#ifndef SVF_AE_BOX_ADDRESS_DOMAIN_H
+#define SVF_AE_BOX_ADDRESS_DOMAIN_H
 
 #include "AE/Core/AbstractDomain.h"
 #include "AE/Core/AddressDomain.h"
-#include "AE/Core/LinearExpression.h"
+#include "AE/Core/Expression.h"
 #include "AE/Core/NumericalDomain.h"
-#include "AE/Core/TreeExpression.h"
 
 #include <cstdint>
 #include <map>
@@ -109,20 +129,21 @@ private:
     std::shared_ptr<Cells> cells_;
 };
 
-/// Complete Box-backed program state. Memory contents are ordinary symbols in
-/// the numerical state; pointer and lifetime facts are kept in small companion
-/// facets because they are not numerical intervals.
-class BoxProgramState final : public AbstractDomain
+/// Reduced product used by AE: Box tracks numerical facts, AddressDomain tracks
+/// pointer facts, and LifetimeDomain tracks allocation status. Memory contents
+/// are ordinary abstract variables in Box or AddressDomain, connected to
+/// locations by the shared MemoryLayout.
+class BoxAddressDomain final : public AbstractDomain
 {
 public:
-    BoxProgramState(BoxDomain numerical, MemoryLayout memoryLayout)
+    BoxAddressDomain(BoxDomain numerical, MemoryLayout memoryLayout)
         : numerical_(std::move(numerical)),
           memoryLayout_(std::move(memoryLayout)),
           addresses_(AddressDomain::top()), lifetimes_(LifetimeDomain::bottom())
     {
     }
 
-    BoxProgramState(BoxDomain numerical, MemoryLayout memoryLayout,
+    BoxAddressDomain(BoxDomain numerical, MemoryLayout memoryLayout,
                     AddressDomain addresses, LifetimeDomain lifetimes)
         : numerical_(std::move(numerical)),
           memoryLayout_(std::move(memoryLayout)),
@@ -136,7 +157,7 @@ public:
     }
     std::unique_ptr<AbstractDomain> clone() const override
     {
-        return std::make_unique<BoxProgramState>(*this);
+        return std::make_unique<BoxAddressDomain>(*this);
     }
 
     BoxDomain& numerical()
@@ -217,12 +238,12 @@ public:
         }
 
         bool first = true;
-        BoxProgramState result(*this);
+        BoxAddressDomain result(*this);
         for (Location location : pointees.locations())
         {
             if (!memoryLayout_.contains(location))
                 continue;
-            BoxProgramState alternative(*this);
+            BoxAddressDomain alternative(*this);
             const Variable content = memoryLayout_.contentOf(location);
             alternative.numerical_.assign(target, LinearExpression(content));
             alternative.addresses_.assign(
@@ -300,12 +321,12 @@ public:
 private:
     const void* dynamicTypeToken() const noexcept override
     {
-        return staticTypeToken<BoxProgramState>();
+        return staticTypeToken<BoxAddressDomain>();
     }
     bool hasCompatibleDomain(const AbstractDomain& other) const override
     {
-        const auto* product = other.isDomain<BoxProgramState>()
-                                  ? &static_cast<const BoxProgramState&>(other)
+        const auto* product = other.isDomain<BoxAddressDomain>()
+                                  ? &static_cast<const BoxAddressDomain&>(other)
                                   : nullptr;
         return product && memoryLayout_ == product->memoryLayout_ &&
                numerical_.config().operationCompatible(
@@ -314,7 +335,7 @@ private:
 
     void joinDomain(const AbstractDomain& other) override
     {
-        const BoxProgramState& product = requireProduct(other);
+        const BoxAddressDomain& product = requireProduct(other);
         if (product.isBottomDomain())
             return;
         if (isBottomDomain())
@@ -329,7 +350,7 @@ private:
 
     void meetDomain(const AbstractDomain& other) override
     {
-        const BoxProgramState& product = requireProduct(other);
+        const BoxAddressDomain& product = requireProduct(other);
         if (product.isTopDomain())
             return;
         if (isTopDomain())
@@ -344,7 +365,7 @@ private:
 
     void widenDomain(const AbstractDomain& next) override
     {
-        const BoxProgramState& product = requireProduct(next);
+        const BoxAddressDomain& product = requireProduct(next);
         if (isBottomDomain())
         {
             *this = product;
@@ -357,7 +378,7 @@ private:
 
     void narrowDomain(const AbstractDomain& next) override
     {
-        const BoxProgramState& product = requireProduct(next);
+        const BoxAddressDomain& product = requireProduct(next);
         if (isTopDomain())
         {
             *this = product;
@@ -386,7 +407,7 @@ private:
 
     bool leqDomain(const AbstractDomain& other) const override
     {
-        const BoxProgramState& product = requireProduct(other);
+        const BoxAddressDomain& product = requireProduct(other);
         if (isBottomDomain() || product.isTopDomain())
             return true;
         if (product.isBottomDomain())
@@ -403,10 +424,10 @@ private:
                ", lifetimes=" + lifetimes_.toString();
     }
 
-    const BoxProgramState& requireProduct(const AbstractDomain& other) const
+    const BoxAddressDomain& requireProduct(const AbstractDomain& other) const
     {
         requireCompatible(other);
-        return static_cast<const BoxProgramState&>(other);
+        return static_cast<const BoxAddressDomain&>(other);
     }
 
     void strongStore(Variable content, Variable source)
@@ -417,7 +438,7 @@ private:
 
     void weakStore(Variable content, Variable source)
     {
-        BoxProgramState alternative(*this);
+        BoxAddressDomain alternative(*this);
         alternative.strongStore(content, source);
         joinDomain(alternative);
     }
@@ -430,4 +451,4 @@ private:
 
 } // namespace SVF::AbstractDomain
 
-#endif // SVF_AE_BOX_PROGRAM_STATE_H
+#endif // SVF_AE_BOX_ADDRESS_DOMAIN_H
