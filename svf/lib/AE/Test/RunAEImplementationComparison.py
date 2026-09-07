@@ -42,11 +42,64 @@ DIFFERENCE_FIELDS = (
     "reference_status",
     "candidate_status",
     "hash_equal",
+    "equal_query_answers",
+    "reference_only_queries",
+    "candidate_only_queries",
+    "different_query_answers",
+    "reachability_differences",
+    "numeric_differences",
+    "address_differences",
+    "freed_differences",
+    "reference_top_candidate_non_top",
+    "reference_non_top_candidate_top",
+    "first_different_query",
+    "first_reference_answer",
+    "first_candidate_answer",
     "reference_only_records",
     "candidate_only_records",
     "first_reference_only_record",
     "first_candidate_only_record",
 )
+
+QUERY_DIFFERENCE_FIELDS = (
+    "host",
+    "input",
+    "reference",
+    "candidate",
+    "query",
+    "difference",
+    "reference_answer",
+    "candidate_answer",
+)
+
+
+def query_projection(records):
+    """Index canonical records by their semantic query, excluding the answer."""
+    projection = {}
+    for record in records:
+        fields = record.split("|", 4)
+        if fields[0] == "R" and len(fields) == 3:
+            key, answer = "|".join(fields[:2]), fields[2]
+        elif fields[0] == "F" and len(fields) == 4:
+            key, answer = "|".join(fields[:3]), fields[3]
+        elif fields[0] in {"V", "M"} and len(fields) == 5:
+            key, answer = "|".join(fields[:4]), fields[4]
+        else:
+            raise RuntimeError(f"malformed semantic query record: {record}")
+        previous = projection.setdefault(key, answer)
+        if previous != answer:
+            raise RuntimeError(
+                f"semantic query has multiple answers: {key}: "
+                f"{previous} and {answer}"
+            )
+    return projection
+
+
+def difference_kind(key):
+    fields = key.split("|")
+    if fields[0] in {"R", "F"}:
+        return fields[0]
+    return fields[3]
 
 
 def labeled_path(value):
@@ -200,6 +253,7 @@ def main():
     )
     parser.add_argument("--require-all-pass", action="store_true")
     parser.add_argument("--record-differences-output")
+    parser.add_argument("--query-differences-output")
     parser.add_argument("--output", required=True)
     options = parser.parse_args()
     if options.repetitions < 0 or options.timeout <= 0:
@@ -212,6 +266,11 @@ def main():
         parser.error("at least one candidate must provide a hash runner")
     if options.record_differences_output and not options.hash_repetitions:
         parser.error("record differences require a hash repetition")
+    if (
+        options.query_differences_output
+        and not options.record_differences_output
+    ):
+        parser.error("query differences require record differences")
 
     failures = []
     output_path = pathlib.Path(options.output)
@@ -227,6 +286,17 @@ def main():
         )
         differences_writer.writeheader()
         differences_file.flush()
+    query_differences_file = None
+    query_differences_writer = None
+    if options.query_differences_output:
+        query_differences_path = pathlib.Path(options.query_differences_output)
+        query_differences_path.parent.mkdir(parents=True, exist_ok=True)
+        query_differences_file = query_differences_path.open("w", newline="")
+        query_differences_writer = csv.DictWriter(
+            query_differences_file, fieldnames=QUERY_DIFFERENCE_FIELDS
+        )
+        query_differences_writer.writeheader()
+        query_differences_file.flush()
     output_file = output_path.open("w", newline="")
     try:
         writer = csv.DictWriter(output_file, fieldnames=FIELDS)
@@ -297,13 +367,57 @@ def main():
                         if comparable:
                             reference_records = hash_records[reference]
                             candidate_records = hash_records[label]
+                            reference_queries = query_projection(
+                                reference_records
+                            )
+                            candidate_queries = query_projection(
+                                candidate_records
+                            )
+                            reference_keys = set(reference_queries)
+                            candidate_keys = set(candidate_queries)
+                            common_keys = reference_keys & candidate_keys
+                            different_queries = sorted(
+                                key
+                                for key in common_keys
+                                if reference_queries[key]
+                                != candidate_queries[key]
+                            )
+                            equal_queries = len(common_keys) - len(
+                                different_queries
+                            )
+                            kind_counts = {
+                                kind: sum(
+                                    difference_kind(key) == kind
+                                    for key in different_queries
+                                )
+                                for kind in ("R", "N", "A", "F")
+                            }
+                            reference_top_candidate_non_top = sum(
+                                reference_queries[key] == "top"
+                                and candidate_queries[key] != "top"
+                                for key in different_queries
+                            )
+                            reference_non_top_candidate_top = sum(
+                                reference_queries[key] != "top"
+                                and candidate_queries[key] == "top"
+                                for key in different_queries
+                            )
                             reference_only = sorted(
-                                reference_records - candidate_records
+                                set(reference_records) - set(candidate_records)
                             )
                             candidate_only = sorted(
-                                candidate_records - reference_records
+                                set(candidate_records) - set(reference_records)
                             )
                         else:
+                            reference_keys = set()
+                            candidate_keys = set()
+                            different_queries = []
+                            equal_queries = 0
+                            kind_counts = {
+                                kind: 0 for kind in ("R", "N", "A", "F")
+                            }
+                            reference_top_candidate_non_top = 0
+                            reference_non_top_candidate_top = 0
                             reference_only = []
                             candidate_only = []
                         differences_writer.writerow(
@@ -326,6 +440,61 @@ def main():
                                     if comparable
                                     else ""
                                 ),
+                                "equal_query_answers": (
+                                    equal_queries if comparable else ""
+                                ),
+                                "reference_only_queries": (
+                                    len(reference_keys - candidate_keys)
+                                    if comparable
+                                    else ""
+                                ),
+                                "candidate_only_queries": (
+                                    len(candidate_keys - reference_keys)
+                                    if comparable
+                                    else ""
+                                ),
+                                "different_query_answers": (
+                                    len(different_queries)
+                                    if comparable
+                                    else ""
+                                ),
+                                "reachability_differences": (
+                                    kind_counts["R"] if comparable else ""
+                                ),
+                                "numeric_differences": (
+                                    kind_counts["N"] if comparable else ""
+                                ),
+                                "address_differences": (
+                                    kind_counts["A"] if comparable else ""
+                                ),
+                                "freed_differences": (
+                                    kind_counts["F"] if comparable else ""
+                                ),
+                                "reference_top_candidate_non_top": (
+                                    reference_top_candidate_non_top
+                                    if comparable
+                                    else ""
+                                ),
+                                "reference_non_top_candidate_top": (
+                                    reference_non_top_candidate_top
+                                    if comparable
+                                    else ""
+                                ),
+                                "first_different_query": (
+                                    different_queries[0]
+                                    if different_queries
+                                    else ""
+                                ),
+                                "first_reference_answer": (
+                                    reference_queries[different_queries[0]]
+                                    if different_queries
+                                    else ""
+                                ),
+                                "first_candidate_answer": (
+                                    candidate_queries[different_queries[0]]
+                                    if different_queries
+                                    else ""
+                                ),
                                 "reference_only_records": (
                                     len(reference_only) if comparable else ""
                                 ),
@@ -340,11 +509,62 @@ def main():
                                 ),
                             }
                         )
+                        if comparable and query_differences_writer:
+                            query_rows = []
+                            for key in sorted(reference_keys - candidate_keys):
+                                query_rows.append(
+                                    (
+                                        key,
+                                        "reference-only",
+                                        reference_queries[key],
+                                        "",
+                                    )
+                                )
+                            for key in sorted(candidate_keys - reference_keys):
+                                query_rows.append(
+                                    (
+                                        key,
+                                        "candidate-only",
+                                        "",
+                                        candidate_queries[key],
+                                    )
+                                )
+                            for key in different_queries:
+                                query_rows.append(
+                                    (
+                                        key,
+                                        "answer-different",
+                                        reference_queries[key],
+                                        candidate_queries[key],
+                                    )
+                                )
+                            for (
+                                key,
+                                difference,
+                                reference_answer,
+                                candidate_answer,
+                            ) in query_rows:
+                                query_differences_writer.writerow(
+                                    {
+                                        "host": platform.node(),
+                                        "input": input_label,
+                                        "reference": reference,
+                                        "candidate": label,
+                                        "query": key,
+                                        "difference": difference,
+                                        "reference_answer": reference_answer,
+                                        "candidate_answer": candidate_answer,
+                                    }
+                                )
                     differences_file.flush()
+                    if query_differences_file:
+                        query_differences_file.flush()
     finally:
         output_file.close()
         if differences_file:
             differences_file.close()
+        if query_differences_file:
+            query_differences_file.close()
     if failures:
         raise RuntimeError("; ".join(failures))
 
