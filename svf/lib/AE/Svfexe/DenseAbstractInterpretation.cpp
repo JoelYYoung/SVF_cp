@@ -309,7 +309,10 @@ void DenseAbstractInterpretation::assignMemoryValue(
         denseState.numerical().forget(content);
     else
         assignInterval(denseState, content, interval);
-    denseState.addresses().assign(content, addresses);
+    if (addresses.isBottom())
+        denseState.addresses().forget(content);
+    else
+        denseState.addresses().assign(content, addresses);
 }
 
 void DenseAbstractInterpretation::materializeValue(DenseState&, const ValVar*,
