@@ -23,12 +23,11 @@
 
 //
 //  Created on: Jan 10, 2024
-//      Author: Xiao Cheng, Jiawei Wang, Jiawei Yang
+//      Author: Xiao Cheng, Jiawei Wang
 //
 
 #include "AE/Svfexe/AbstractInterpretation.h"
 #include "AE/Svfexe/AbsExtAPI.h"
-#include "AE/Svfexe/BoxAddressAbstractInterpretation.h"
 #include "AE/Svfexe/SparseAbstractInterpretation.h"
 #include "Graphs/CallGraph.h"
 #include "SVFIR/SVFIR.h"
@@ -39,10 +38,68 @@
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
+#include <tuple>
 
 using namespace SVF;
 using namespace SVFUtil;
 namespace AD = SVF::AbstractDomain;
+
+static std::vector<const ICFGEdge*> orderedIncomingEdges(const ICFGNode* node)
+{
+    std::vector<const ICFGEdge*> edges(node->getInEdges().begin(),
+                                       node->getInEdges().end());
+    std::sort(edges.begin(), edges.end(),
+              [](const ICFGEdge* lhs, const ICFGEdge* rhs) {
+                  return std::make_tuple(lhs->getSrcID(),
+                                         lhs->getEdgeKindWithoutMask()) <
+                         std::make_tuple(rhs->getSrcID(),
+                                         rhs->getEdgeKindWithoutMask());
+              });
+    return edges;
+}
+
+void AbstractInterpretation::handleGlobalNode()
+{
+    const ICFGNode* node = icfg->getGlobalICFGNode();
+    stateTrace_.insert_or_assign(node, topState());
+    for (const SVFStmt* statement : node->getSVFStmts())
+        handleSVFStatement(statement);
+
+    if (const auto* variable = SVFUtil::dyn_cast<ValVar>(
+            svfir->getGNode(PAG::getPAG()->getBlkPtr())))
+        updateValue(variable, AD::Interval::top(), AD::AddressSet::top(), node);
+}
+
+void AbstractInterpretation::initializeObjectValue(
+    const ObjVar* object, AD::Interval& interval, AD::AddressSet& addresses,
+    const ICFGNode* node)
+{
+    interval = AD::Interval::bottom();
+    addresses = AD::AddressSet::bottom();
+    State& denseState = ensureState(node);
+    denseState.allocate(adapter_.location(*object));
+
+    const BaseObjVar* base = PAG::getPAG()->getBaseObject(object->getId());
+    if (base->isConstDataOrConstGlobal() || base->isConstantArray() ||
+        base->isConstantStruct())
+    {
+        if (const auto* integer = SVFUtil::dyn_cast<ConstIntObjVar>(object))
+            interval =
+                AD::Interval::singleton(AD::Rational(integer->getSExtValue()));
+        else if (const auto* floating =
+                     SVFUtil::dyn_cast<ConstFPObjVar>(object))
+            interval = AD::Interval::singleton(
+                AD::Rational::fromDouble(floating->getFPValue()));
+        else if (SVFUtil::isa<ConstNullPtrObjVar>(object))
+            addresses = AD::AddressSet::singleton(AD::Location::null());
+        else if (!SVFUtil::isa<GlobalObjVar>(object))
+            interval = AD::Interval::top();
+        if (!interval.isBottom() || !addresses.isBottom())
+            return;
+    }
+    addresses = AD::AddressSet::singleton(adapter_.location(*object));
+}
+
 
 void AbstractInterpretation::runOnModule()
 {
@@ -61,7 +118,7 @@ void AbstractInterpretation::runOnModule()
         detector->reportBug();
 }
 
-AbstractInterpretation::AbstractInterpretation()
+AbstractInterpretation::AbstractInterpretation() : adapter_(*PAG::getPAG())
 {
     stat = new AEStat(this);
     // Run Andersen's pointer analysis and build WTO
@@ -90,7 +147,7 @@ AbstractInterpretation& AbstractInterpretation::getAEInstance()
             return new FullSparseAbstractInterpretation();
         case AESparsity::Dense:
         default:
-            return new BoxAddressAbstractInterpretation();
+            return new AbstractInterpretation();
         }
     }();
     return *instance;
@@ -519,9 +576,18 @@ void AbstractInterpretation::collectBranchRefinement(
 }
 
 void AbstractInterpretation::recordBranchRefinement(
-    NodeID, const AD::Interval&, AbstractDomain::AbstractDomain&,
-    const ICFGNode*, const ICFGNode*)
+    NodeID objectId, const AD::Interval& narrowed,
+    AD::AbstractDomain& abstractState, const ICFGNode*, const ICFGNode*)
 {
+    const auto* object = SVFUtil::dyn_cast<ObjVar>(svfir->getGNode(objectId));
+    if (!object || object->isPointer())
+        return;
+
+    State& denseState = static_cast<State&>(abstractState);
+    const AD::Variable content = adapter_.contentVariable(*object);
+    AD::Interval refined = denseState.numerical().bound(content);
+    refined.meetWith(narrowed);
+    assignInterval(denseState, content, refined);
 }
 
 /**
@@ -732,6 +798,59 @@ void AbstractInterpretation::handleFunCall(const CallICFGNode* callNode)
     }
     // Resume return node from caller's state (context-insensitive)
     copyAbstractState(callNode, retNode);
+}
+
+bool AbstractInterpretation::mergeStatesFromPredecessors(
+    const ICFGNode* node)
+{
+    State merged = bottomState();
+    bool hasFeasiblePredecessor = false;
+
+    for (const ICFGEdge* edge : orderedIncomingEdges(node))
+    {
+        const ICFGNode* predecessor = edge->getSrcNode();
+        if (stateTrace_.count(predecessor) == 0)
+            continue;
+
+        bool shouldMerge = false;
+        const IntraCFGEdge* conditional = SVFUtil::dyn_cast<IntraCFGEdge>(edge);
+        if (conditional)
+            shouldMerge = true;
+        else if (SVFUtil::isa<CallCFGEdge>(edge))
+        {
+            shouldMerge = true;
+        }
+        else if (SVFUtil::isa<RetCFGEdge>(edge))
+        {
+            shouldMerge = Options::HandleRecur() == TOP;
+            if (!shouldMerge)
+            {
+                const auto* returnSite = SVFUtil::dyn_cast<RetICFGNode>(node);
+                shouldMerge =
+                    returnSite &&
+                    stateTrace_.count(returnSite->getCallICFGNode()) != 0;
+            }
+        }
+        if (!shouldMerge)
+            continue;
+
+        State source = state(predecessor);
+        if (conditional && conditional->getCondition())
+        {
+            assumeBranch(conditional, source);
+            collectBranchRefinement(conditional, source);
+        }
+        if (source.isBottom())
+            continue;
+
+        merged.joinWith(source);
+        hasFeasiblePredecessor = true;
+    }
+
+    if (!hasFeasiblePredecessor)
+        return false;
+    stateTrace_.insert_or_assign(node, std::move(merged));
+    return true;
 }
 
 // Loop / recursion handling (handleLoopOrRecursion + cycle helpers +

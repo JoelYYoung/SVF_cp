@@ -161,6 +161,54 @@ bool AbstractInterpretation::shouldApplyNarrowing(const FunObjVar* fun)
     }
 }
 
+std::unique_ptr<AbstractDomain::AbstractDomain> AbstractInterpretation::
+    cloneCycleHeadState(const ICFGCycleWTO* cycle)
+{
+    return cloneAbstractState(cycle->head()->getICFGNode());
+}
+
+bool AbstractInterpretation::widenCycleState(
+    const AbstractDomain::AbstractDomain& previous,
+    const AbstractDomain::AbstractDomain& current, const ICFGCycleWTO* cycle)
+{
+    const State& previousDense = static_cast<const State&>(previous);
+    const State& currentDense = static_cast<const State&>(current);
+    State next = previousDense;
+    next.widenWith(currentDense);
+    const bool fixpoint =
+        next.isEquivalentTo(previousDense) == AbstractDomain::CheckResult::True;
+    const ICFGNode* head = cycle->head()->getICFGNode();
+    stateTrace_.insert_or_assign(head, std::move(next));
+    return fixpoint;
+}
+
+bool AbstractInterpretation::narrowCycleState(
+    const AbstractDomain::AbstractDomain& previous,
+    const AbstractDomain::AbstractDomain& current, const ICFGCycleWTO* cycle)
+{
+    const ICFGNode* head = cycle->head()->getICFGNode();
+    if (!shouldApplyNarrowing(head->getFun()))
+        return true;
+    const State& previousDense = static_cast<const State&>(previous);
+    State currentDense = static_cast<const State&>(current);
+    // Sparse transfers may materialize a new MemorySSA/cycle facet during the
+    // descending phase. Enforce narrowing's generic next <= current contract.
+    // The normal descending path already satisfies that contract. Avoid
+    // rebuilding and closing a relational meet when the lattice check proves
+    // that the meet would be exactly currentDense. False and Unknown retain
+    // the original conservative meet.
+    if (currentDense.isSubsetOf(previousDense) !=
+        AbstractDomain::CheckResult::True)
+        currentDense.meetWith(previousDense);
+    State next = previousDense;
+    next.narrowWith(currentDense);
+    const bool fixpoint =
+        next.isEquivalentTo(previousDense) == AbstractDomain::CheckResult::True;
+    if (!fixpoint)
+        stateTrace_.insert_or_assign(head, std::move(next));
+    return fixpoint;
+}
+
 // =====================================================================
 //  Cycle / recursion driver
 //

@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <http://www.gnu.org/licenses/>.
 //
-// Contributors: Xiao Cheng, Jiawei Wang, Jiawei Yang
+// Contributors: Xiao Cheng, Jiawei Wang
 //
 //===----------------------------------------------------------------------===//
 
@@ -28,7 +28,7 @@
 #include <memory>
 #include <optional>
 
-#include "AE/Svfexe/BoxAddressAbstractInterpretation.h"
+#include "AE/Svfexe/AbstractInterpretation.h"
 
 namespace SVF
 {
@@ -40,11 +40,10 @@ class VFGNode;
 /// Semi-sparse AE backed by BoxAddressDomain. Box values use one module-wide
 /// scalar carrier. Persistent ICFG states carry memory and lifetime values,
 /// while transfers materialize scalar operands only temporarily.
-class SemiSparseAbstractInterpretation
-    : public BoxAddressAbstractInterpretation
+class SemiSparseAbstractInterpretation : public AbstractInterpretation
 {
 public:
-    using Base = BoxAddressAbstractInterpretation;
+    using Base = AbstractInterpretation;
     using State = typename Base::State;
 
     SemiSparseAbstractInterpretation();
