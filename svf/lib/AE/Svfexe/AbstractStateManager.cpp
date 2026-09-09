@@ -593,8 +593,16 @@ bool AbstractInterpretation::hasAbsValue(const ValVar* var,
 bool AbstractInterpretation::hasAbsValue(const ObjVar* var,
         const ICFGNode* node) const
 {
-    (void)var;
-    return stateTrace_.count(node) != 0;
+    const auto stateIterator = stateTrace_.find(node);
+    if (stateIterator == stateTrace_.end())
+        return false;
+    // Top is the semantic default and has no physical slot. Treat this query
+    // as a materialization test so sparse pulls do not mistake an absent
+    // object for a real incoming definition.
+    const AD::Variable content = adapter_.contentVariable(*var);
+    return var->isPointer()
+           ? !stateIterator->second.addresses().addressSet(content).isTop()
+           : !stateIterator->second.numerical().bound(content).isTop();
 }
 
 bool AbstractInterpretation::hasAbsValue(const SVFVar* var,

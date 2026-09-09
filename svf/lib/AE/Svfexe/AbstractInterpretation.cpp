@@ -391,9 +391,6 @@ static AD::Interval computeCmpConstraint(s32_t predicate, s64_t succ,
 
     // Now compute the constraint on LHS given: LHS <predicate> other
     AD::Interval result = self;
-    if (!other.isSingleton())
-        return AD::Interval::top();
-    const AD::Rational bound = other.singletonValue();
     switch (predicate)
     {
     case CmpStmt::ICMP_EQ:
@@ -404,37 +401,79 @@ static AD::Interval computeCmpConstraint(s32_t predicate, s64_t succ,
     case CmpStmt::ICMP_NE:
     case CmpStmt::FCMP_ONE:
     case CmpStmt::FCMP_UNE:
+        if (!other.isSingleton())
+            return AD::Interval::top();
+        if (result.lower().isFinite() && !result.lower().isStrict() &&
+                result.lower().value() == other.singletonValue())
+        {
+            const bool integerPredicate = predicate == CmpStmt::ICMP_NE;
+            result.meetWith(AD::Interval(
+                                AD::Bound::finite(
+                                    other.singletonValue() +
+                                    (integerPredicate ? AD::Rational(1) :
+                                     AD::Rational()),
+                                    !integerPredicate),
+                                AD::Bound::plusInfinity()));
+        }
+        else if (result.upper().isFinite() && !result.upper().isStrict() &&
+                 result.upper().value() == other.singletonValue())
+        {
+            const bool integerPredicate = predicate == CmpStmt::ICMP_NE;
+            result.meetWith(AD::Interval(
+                                AD::Bound::minusInfinity(),
+                                AD::Bound::finite(
+                                    other.singletonValue() -
+                                    (integerPredicate ? AD::Rational(1) :
+                                     AD::Rational()),
+                                    !integerPredicate)));
+        }
+        else
+            return AD::Interval::top();
+        break;
     case CmpStmt::FCMP_FALSE:
     case CmpStmt::FCMP_TRUE:
-        return AD::Interval::top(); // no useful narrowing
+        return AD::Interval::top();
     case CmpStmt::ICMP_UGT:
     case CmpStmt::ICMP_SGT:
     case CmpStmt::FCMP_OGT:
     case CmpStmt::FCMP_UGT:
-        result.meetWith(AD::Interval(AD::Bound::finite(bound + AD::Rational(1)),
-                                     AD::Bound::plusInfinity()));
+        if (!other.lower().isFinite())
+            return result;
+        result.meetWith(
+            AD::Interval(AD::Bound::finite(other.lower().value(), true),
+                         AD::Bound::plusInfinity()));
         break;
     case CmpStmt::ICMP_UGE:
     case CmpStmt::ICMP_SGE:
     case CmpStmt::FCMP_OGE:
     case CmpStmt::FCMP_UGE:
+        if (!other.lower().isFinite())
+            return result;
         result.meetWith(
-            AD::Interval(AD::Bound::finite(bound), AD::Bound::plusInfinity()));
+            AD::Interval(AD::Bound::finite(other.lower().value(),
+                                           other.lower().isStrict()),
+                         AD::Bound::plusInfinity()));
         break;
     case CmpStmt::ICMP_ULT:
     case CmpStmt::ICMP_SLT:
     case CmpStmt::FCMP_OLT:
     case CmpStmt::FCMP_ULT:
+        if (!other.upper().isFinite())
+            return result;
         result.meetWith(
             AD::Interval(AD::Bound::minusInfinity(),
-                         AD::Bound::finite(bound - AD::Rational(1))));
+                         AD::Bound::finite(other.upper().value(), true)));
         break;
     case CmpStmt::ICMP_ULE:
     case CmpStmt::ICMP_SLE:
     case CmpStmt::FCMP_OLE:
     case CmpStmt::FCMP_ULE:
+        if (!other.upper().isFinite())
+            return result;
         result.meetWith(
-            AD::Interval(AD::Bound::minusInfinity(), AD::Bound::finite(bound)));
+            AD::Interval(AD::Bound::minusInfinity(),
+                         AD::Bound::finite(other.upper().value(),
+                                           other.upper().isStrict())));
         break;
     default:
         return AD::Interval::top();
@@ -490,10 +529,6 @@ void AbstractInterpretation::collectBranchRefinement(
                     if (opVal[i].isSingleton())
                     {
                         // Example: in x < 5, operand 5 is not refined.
-                    }
-                    else if (!opVal[other].isSingleton())
-                    {
-                        // Example: x < y, neither side has a fixed bound.
                     }
                     else if (!load)
                     {
@@ -725,6 +760,21 @@ bool AbstractInterpretation::isExtCall(const CallICFGNode* callNode)
 void AbstractInterpretation::handleExtCall(const CallICFGNode* callNode)
 {
     utils->handleExtAPI(callNode);
+    // An unmodelled fixed-width integer return is not mathematical Top. Its
+    // machine range remains a sound finite fact and, unlike implicit Top, can
+    // be carried as an explicit MemorySSA definition after a store.
+    const RetICFGNode* returnNode = callNode->getRetICFGNode();
+    const SVFVar* actualReturn = returnNode ? returnNode->getActualRet() : nullptr;
+    const ValVar* returnValue = actualReturn
+                                ? SVFUtil::dyn_cast<ValVar>(actualReturn)
+                                : nullptr;
+    if (returnValue && !returnValue->isPointer() &&
+            SVFUtil::isa<SVFIntegerType>(returnValue->getType()))
+    {
+        AD::Interval value = getInterval(returnValue, callNode);
+        value.meetWith(utils->getRangeLimitFromType(returnValue->getType()));
+        updateInterval(returnValue, value, callNode);
+    }
     for (auto& detector : detectors)
     {
         detector->handleStubFunctions(callNode);
@@ -1367,11 +1417,19 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
     }
     else if (copy->getCopyKind() == CopyStmt::FPTOSI)
     {
-        updateInterval(lhsVar, rhsInterval, node);
+        updateInterval(
+            lhsVar,
+            AD::floatToInteger(rhsInterval,
+                               lhsVar->getType()->getByteSize() * 8, true),
+            node);
     }
     else if (copy->getCopyKind() == CopyStmt::FPTOUI)
     {
-        updateInterval(lhsVar, rhsInterval, node);
+        updateInterval(
+            lhsVar,
+            AD::floatToInteger(rhsInterval,
+                               lhsVar->getType()->getByteSize() * 8, false),
+            node);
     }
     else if (copy->getCopyKind() == CopyStmt::SITOFP)
     {

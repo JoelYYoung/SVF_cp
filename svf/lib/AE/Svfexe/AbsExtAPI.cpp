@@ -502,7 +502,9 @@ bool AbsExtAPI::isValidLength(const AD::Interval& len)
 
 /// Calculate the length of a null-terminated string in abstract state.
 /// Scans memory from the base of strValue looking for a '\0' byte.
-/// Returns an exact length if '\0' is found, otherwise [0, MaxFieldLimit].
+/// Returns an exact length when all preceding elements are definitely non-zero.
+/// If an earlier element is unknown, a definite '\0' still provides a sound
+/// upper bound. Returns [0, MaxFieldLimit] if no such bound is established.
 AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
 {
     // Step 1: determine the buffer size (in bytes) backing this pointer
@@ -542,11 +544,14 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
         }
 
     // Step 2: scan for a definitely positioned '\0' terminator.  A pointer
-    // may denote several backing objects, so every byte before the terminator
-    // must be definitely non-zero across all pointees.  An unknown byte or a
-    // missing terminator cannot soundly be treated as an exact string length.
+    // may denote several backing objects, so an exact result requires every
+    // preceding element to be definitely non-zero across all pointees.
+    // Unknown preceding elements do not invalidate a later definite
+    // terminator: they only weaken the result from an exact length to an upper
+    // bound because the string may terminate earlier.
     if (!ptrVal.isBottom() && !ptrVal.isTop() && dst_size != 0)
     {
+        bool exactPrefix = true;
         for (u32_t index = 0; index < dst_size; index++)
         {
             const AD::AddressSet expression =
@@ -559,14 +564,14 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
             {
                 value.joinWith(ae->getMemoryInterval(location, node));
             }
-            if (!value.isSingleton())
-                return AD::Interval::closed(
-                           AD::Rational(0), AD::Rational(Options::MaxFieldLimit()));
             if (value.isZero())
             {
                 const u32_t elemSize = getElementSize(strValue);
-                return integerInterval(index * elemSize);
+                const AD::Rational byteLength(index * elemSize);
+                return exactPrefix ? integerInterval(index * elemSize) :
+                       AD::Interval::closed(AD::Rational(0), byteLength);
             }
+            exactPrefix = exactPrefix && value.isSingleton();
         }
     }
 
@@ -730,49 +735,9 @@ AD::Interval AbsExtAPI::getRangeLimitFromType(const SVFType* type)
 {
     if (const SVFIntegerType* intType = SVFUtil::dyn_cast<SVFIntegerType>(type))
     {
-        u32_t bits = type->getByteSize() * 8;
-        s64_t ub = 0;
-        s64_t lb = 0;
-        if (bits >= 32)
-        {
-            if (intType->isSigned())
-            {
-                ub = static_cast<s64_t>(std::numeric_limits<s32_t>::max());
-                lb = static_cast<s64_t>(std::numeric_limits<s32_t>::min());
-            }
-            else
-            {
-                ub = static_cast<s64_t>(std::numeric_limits<u32_t>::max());
-                lb = static_cast<s64_t>(std::numeric_limits<u32_t>::min());
-            }
-        }
-        else if (bits == 16)
-        {
-            if (intType->isSigned())
-            {
-                ub = static_cast<s64_t>(std::numeric_limits<s16_t>::max());
-                lb = static_cast<s64_t>(std::numeric_limits<s16_t>::min());
-            }
-            else
-            {
-                ub = static_cast<s64_t>(std::numeric_limits<u16_t>::max());
-                lb = static_cast<s64_t>(std::numeric_limits<u16_t>::min());
-            }
-        }
-        else if (bits == 8)
-        {
-            if (intType->isSigned())
-            {
-                ub = static_cast<s64_t>(std::numeric_limits<int8_t>::max());
-                lb = static_cast<s64_t>(std::numeric_limits<int8_t>::min());
-            }
-            else
-            {
-                ub = static_cast<s64_t>(std::numeric_limits<uint8_t>::max());
-                lb = static_cast<s64_t>(std::numeric_limits<uint8_t>::min());
-            }
-        }
-        return AD::Interval::closed(AD::Rational(lb), AD::Rational(ub));
+        const u32_t bits = type->getByteSize() * 8;
+        return bits == 0 ? AD::Interval::top()
+               : AD::integerRange(bits, intType->isSigned());
     }
     else if (SVFUtil::isa<SVFOtherType>(type))
     {

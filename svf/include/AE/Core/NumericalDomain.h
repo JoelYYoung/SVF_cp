@@ -295,6 +295,13 @@ Interval lessThan(const Interval& lhs, const Interval& rhs);
 Interval lessEqual(const Interval& lhs, const Interval& rhs);
 Interval greaterThan(const Interval& lhs, const Interval& rhs);
 Interval greaterEqual(const Interval& lhs, const Interval& rhs);
+/// Complete mathematical range of a fixed-width signed or unsigned integer.
+Interval integerRange(unsigned bitWidth, bool isSigned);
+/// Convert a floating interval to a fixed-width integer using LLVM's
+/// round-toward-zero semantics. If the operand may produce poison because it
+/// is non-finite or outside the destination range, return that complete range.
+Interval floatToInteger(const Interval& operand, unsigned bitWidth,
+                        bool isSigned);
 
 enum class RoundingMode
 {

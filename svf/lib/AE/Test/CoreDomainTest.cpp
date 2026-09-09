@@ -87,6 +87,20 @@ void testScalarTransferOperations()
     require(Rational::fromDouble(0.0) == Rational(0) &&
             Rational::fromDouble(0.5) == Rational(Integer(1), Integer(2)),
             "native floating-to-rational conversion was not exact");
+    require(
+        hasBounds(integerRange(64, false), Rational(0),
+                  Rational("18446744073709551615")) &&
+        floatToInteger(Interval::singleton(Rational("-157/50")), 32, true) ==
+        integerInterval(-3) &&
+        floatToInteger(Interval::singleton(Rational("157/50")), 32, false) ==
+        integerInterval(3) &&
+        hasBounds(floatToInteger(
+                      Interval::closed(Rational("-15/4"), Rational("17/4")),
+                      32, true),
+                  Rational(-3), Rational(4)) &&
+        hasBounds(floatToInteger(integerInterval(-1), 8, false), Rational(0),
+                  Rational(255)),
+        "floating-to-integer transfer did not truncate or handle poison");
     const Interval two = integerInterval(2);
     const Interval four = integerInterval(4);
     require(add(two, four) == integerInterval(6) &&

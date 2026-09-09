@@ -1641,6 +1641,34 @@ Interval remainder(const Interval& lhs, const Interval& rhs)
     return remainderIntervals(lhs, rhs);
 }
 
+Interval integerRange(unsigned bitWidth, bool isSigned)
+{
+    if (bitWidth == 0)
+        throw std::invalid_argument(
+            "integer width must be positive");
+
+    mpz_class magnitude = 1;
+    mpz_mul_2exp(magnitude.get_mpz_t(), magnitude.get_mpz_t(),
+                 isSigned ? bitWidth - 1 : bitWidth);
+    const mpz_class lower = isSigned ? -magnitude : mpz_class(0);
+    const mpz_class upper = magnitude - 1;
+    return Interval::closed(Rational::fromRaw(mpq_class(lower)),
+                            Rational::fromRaw(mpq_class(upper)));
+}
+
+Interval floatToInteger(const Interval& operand, unsigned bitWidth,
+                        bool isSigned)
+{
+    if (operand.isBottom())
+        return bottomInterval();
+
+    const Interval destinationRange = integerRange(bitWidth, isSigned);
+    const Interval converted = castInterval(
+                                   operand, NumericType::integer(), RoundingMode::TowardZero);
+    return converted.isSubsetOf(destinationRange) ? converted
+           : destinationRange;
+}
+
 namespace
 {
 

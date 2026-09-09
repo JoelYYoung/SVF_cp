@@ -224,10 +224,17 @@ void SemiSparseAbstractInterpretation::materializeValue(
 {
     if (!value || !this->adapter_.contains(*value))
         return;
-    if (!value->isPointer())
-        return;
     const AD::Variable variable = this->adapter_.variable(*value);
-    denseState.addresses().assign(variable, getAddressSet(value, node));
+    if (value->isPointer())
+    {
+        denseState.addresses().assign(variable, getAddressSet(value, node));
+        denseState.numerical().forget(variable);
+    }
+    else
+    {
+        this->constrainInterval(denseState, variable, getInterval(value, node));
+        denseState.addresses().forget(variable);
+    }
 }
 
 void SemiSparseAbstractInterpretation::loadValue(
@@ -430,7 +437,8 @@ void FullSparseAbstractInterpretation::filterPropagatedState(
     for (AD::Variable variable : nonDefaultVariables(denseState))
     {
         const ObjVar* object = this->adapter_.contentObject(variable);
-        if (object && !SVFUtil::isa<GepObjVar>(object))
+        if (object && !SVFUtil::isa<GepObjVar>(object) &&
+                !denseMemoryVariables_.count(variable))
             this->forgetValue(denseState, variable);
     }
 }
@@ -462,6 +470,19 @@ void FullSparseAbstractInterpretation::storeValue(
                 refinement->second.erase(object->getId());
     }
     Base::storeValue(pointer, interval, valueAddresses, node);
+}
+
+void FullSparseAbstractInterpretation::updateMemoryValue(
+    AD::Location location, const AD::Interval& interval,
+    const AD::AddressSet& addresses, const ICFGNode* node)
+{
+    if (!location.isNull())
+    {
+        const ObjVar& object = this->adapter_.object(location);
+        denseMemoryVariables_.insert(
+            this->adapter_.contentVariable(object));
+    }
+    Base::updateMemoryValue(location, interval, addresses, node);
 }
 
 bool FullSparseAbstractInterpretation::mergeStatesFromPredecessors(
@@ -530,7 +551,7 @@ void FullSparseAbstractInterpretation::pullObjectValueFlows(
                         continue;
                     const auto* object = SVFUtil::dyn_cast<ObjVar>(
                                              this->svfir->getGNode(fieldId));
-                    if (!object)
+                    if (!object || !Base::hasAbsValue(object, source))
                         continue;
 
                     AD::Interval interval = AD::Interval::bottom();

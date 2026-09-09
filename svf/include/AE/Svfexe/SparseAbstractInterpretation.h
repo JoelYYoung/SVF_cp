@@ -26,6 +26,7 @@
 
 #include <memory>
 #include <optional>
+#include <set>
 
 #include "AE/Svfexe/AbstractInterpretation.h"
 
@@ -128,6 +129,10 @@ protected:
                     const AbstractDomain::Interval& interval,
                     const AbstractDomain::AddressSet& addresses,
                     const ICFGNode* node) override;
+    void updateMemoryValue(AbstractDomain::Location location,
+                           const AbstractDomain::Interval& interval,
+                           const AbstractDomain::AddressSet& addresses,
+                           const ICFGNode* node) override;
     void filterPropagatedState(State& state) const override;
     void recordBranchRefinement(NodeID objectId,
                                 const AbstractDomain::Interval& narrowed,
@@ -145,6 +150,9 @@ private:
 
     Map<const ICFGNode*, Map<NodeID, AbstractDomain::Interval>>
     memoryRefinementTrace_;
+    /// Contents changed through analyzer-side models rather than StoreStmt.
+    /// SVFG has no defining edge for them, so they retain ICFG propagation.
+    std::set<AbstractDomain::Variable> denseMemoryVariables_;
     std::unique_ptr<SVFGBuilder> svfgBuilder_;
 };
 
