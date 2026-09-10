@@ -595,6 +595,7 @@ public:
     void substituteParallel(const LinearAssignmentList& assignments) override;
     void assume(const LinearConstraint& constraint) override;
     void assume(const TreeConstraint& constraint) override;
+    void assumeAll(const LinearConstraintSet& constraints) override;
     void forget(Variable variable) override;
     void expand(Variable source, const std::vector<Variable>& copies) override;
     void fold(Variable target, const std::vector<Variable>& folded) override;

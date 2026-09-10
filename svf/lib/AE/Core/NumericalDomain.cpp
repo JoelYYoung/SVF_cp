@@ -2553,6 +2553,29 @@ void BoxDomain::assume(const TreeConstraint& constraint)
            false);
 }
 
+void BoxDomain::assumeAll(const LinearConstraintSet& constraints)
+{
+    if (constraints.empty())
+    {
+        NumericalDomain::assumeAll(constraints);
+        return;
+    }
+    const bool allUnary = std::all_of(
+                              constraints.begin(), constraints.end(),
+                              [](const LinearConstraint& constraint)
+    {
+        return constraint.expression().terms().size() <= 1;
+    });
+    if (!allUnary)
+    {
+        NumericalDomain::assumeAll(constraints);
+        return;
+    }
+
+    for (const LinearConstraint& constraint : constraints)
+        assume(constraint);
+}
+
 void BoxDomain::forget(Variable variable)
 {
     if (!bottom_)
