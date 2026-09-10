@@ -1111,13 +1111,35 @@ void validateUnknownCallerPointerFlow(const SVFIR& graph,
 void validatePointerOrderingFlow(const SVFIR& graph,
                                  AbstractInterpretation& analysis)
 {
+    const SVFVar* differentCandidate = findValue(graph, "known_different");
+    const SVFVar* sameEqualityCandidate = findValue(graph, "known_same");
+    const SVFVar* branchCandidate =
+        findValue(graph, "pointer_branch_result");
+    const SVFVar* overlapCandidate = findValue(graph, "overlapping_equality");
+    const SVFVar* nullCandidate = findValue(graph, "null_equality");
+    const SVFVar* unknownCandidate = findValue(graph, "opaque_equality");
     const SVFVar* orderingCandidate =
         findValue(graph, "pointer_ordering_result");
     const SVFVar* sameCandidate =
         findValue(graph, "same_pointer_ordering_result");
     const SVFVar* zextCandidate = findValue(graph, "result");
-    if (!orderingCandidate && !sameCandidate)
+    if (!differentCandidate && !orderingCandidate && !sameCandidate)
         return;
+    const auto* different =
+        differentCandidate ? SVFUtil::dyn_cast<ValVar>(differentCandidate)
+        : nullptr;
+    const auto* sameEquality =
+        sameEqualityCandidate
+        ? SVFUtil::dyn_cast<ValVar>(sameEqualityCandidate)
+        : nullptr;
+    const auto* branch =
+        branchCandidate ? SVFUtil::dyn_cast<ValVar>(branchCandidate) : nullptr;
+    const auto* overlap =
+        overlapCandidate ? SVFUtil::dyn_cast<ValVar>(overlapCandidate) : nullptr;
+    const auto* nullEquality =
+        nullCandidate ? SVFUtil::dyn_cast<ValVar>(nullCandidate) : nullptr;
+    const auto* unknown =
+        unknownCandidate ? SVFUtil::dyn_cast<ValVar>(unknownCandidate) : nullptr;
     const auto* ordering = orderingCandidate
                            ? SVFUtil::dyn_cast<ValVar>(orderingCandidate)
                            : nullptr;
@@ -1125,14 +1147,33 @@ void validatePointerOrderingFlow(const SVFIR& graph,
         sameCandidate ? SVFUtil::dyn_cast<ValVar>(sameCandidate) : nullptr;
     const auto* zext =
         zextCandidate ? SVFUtil::dyn_cast<ValVar>(zextCandidate) : nullptr;
-    if (!ordering || !same || !zext)
-        throw std::runtime_error("pointer-ordering fixture is incomplete");
+    if (!different || !sameEquality || !branch || !overlap ||
+            !nullEquality || !unknown || !ordering || !same || !zext)
+        throw std::runtime_error("pointer-comparison fixture is incomplete");
 
+    bool observedKnownDifferent = false;
+    bool observedKnownSame = false;
+    bool observedPrunedBranches = false;
+    bool observedOverlappingTargets = false;
+    bool observedNullEquality = false;
+    bool observedUnknownTarget = false;
     bool observedUnknownOrdering = false;
     bool observedKnownSameOrdering = false;
     bool observedZExtRange = false;
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
     {
+        observedKnownDifferent |=
+            hasFiniteBounds(analysis.getInterval(different, node), 1, 1);
+        observedKnownSame |=
+            hasFiniteBounds(analysis.getInterval(sameEquality, node), 1, 1);
+        observedPrunedBranches |=
+            hasFiniteBounds(analysis.getInterval(branch, node), 7, 7);
+        observedOverlappingTargets |=
+            hasFiniteBounds(analysis.getInterval(overlap, node), 0, 1);
+        observedNullEquality |=
+            hasFiniteBounds(analysis.getInterval(nullEquality, node), 1, 1);
+        observedUnknownTarget |=
+            hasFiniteBounds(analysis.getInterval(unknown, node), 0, 1);
         observedUnknownOrdering |=
             hasFiniteBounds(analysis.getInterval(ordering, node), 0, 1);
         observedKnownSameOrdering |=
@@ -1140,10 +1181,29 @@ void validatePointerOrderingFlow(const SVFIR& graph,
         observedZExtRange |=
             hasFiniteBounds(analysis.getInterval(zext, node), 0, 1);
     }
-    if (!observedUnknownOrdering || !observedKnownSameOrdering ||
-            !observedZExtRange)
-        throw std::runtime_error(
-            "pointer ordering used abstract Location IDs as concrete order");
+    std::vector<std::string> missing;
+    auto requireObserved = [&](bool observed, const char* property)
+    {
+        if (!observed)
+            missing.emplace_back(property);
+    };
+    requireObserved(observedKnownDifferent, "known-different");
+    requireObserved(observedKnownSame, "known-same");
+    requireObserved(observedPrunedBranches, "branch-feasibility");
+    requireObserved(observedOverlappingTargets, "overlapping-targets");
+    requireObserved(observedNullEquality, "null-equality");
+    requireObserved(observedUnknownTarget, "unknown-target");
+    requireObserved(observedUnknownOrdering, "distinct-ordering");
+    requireObserved(observedKnownSameOrdering, "same-ordering");
+    requireObserved(observedZExtRange, "ordering-zext");
+    if (!missing.empty())
+    {
+        std::ostringstream message;
+        message << "pointer comparison validation missed";
+        for (const std::string& property : missing)
+            message << ' ' << property;
+        throw std::runtime_error(message.str());
+    }
 }
 
 void validateNegativeGepFlow(const SVFIR& graph,

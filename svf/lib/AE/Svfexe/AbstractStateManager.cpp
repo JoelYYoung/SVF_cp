@@ -556,6 +556,9 @@ AD::AddressSet AbstractInterpretation::getAddressSet(const ValVar* var,
 {
     if (!var->isPointer())
         return AD::AddressSet::bottom();
+    if (var->getId() == IRGraph::NullPtr ||
+            SVFUtil::isa<ConstNullPtrValVar>(var))
+        return AD::AddressSet::singleton(AD::Location::null());
     if (!adapter_.contains(*var))
         return AD::AddressSet::top();
     const State& denseState = ensureState(node);
@@ -824,6 +827,30 @@ void AbstractInterpretation::assumeBranch(const IntraCFGEdge* edge,
                               AD::LinearExpression(AD::Rational(edge->getSuccessorCondValue()))));
         return;
     }
+
+    // The comparison transfer has already abstracted numeric and pointer
+    // predicates to a Boolean interval. Apply that result first so an exact
+    // pointer comparison can make the incompatible branch unreachable.
+    if (const auto* result =
+                SVFUtil::dyn_cast<ValVar>(comparison->getRes()))
+    {
+        if (adapter_.contains(*result))
+        {
+            materializeValue(denseState, result, edge->getSrcNode());
+            denseState.assume(AD::equal(
+                                  AD::LinearExpression(adapter_.variable(*result)),
+                                  AD::LinearExpression(
+                                      AD::Rational(edge->getSuccessorCondValue()))));
+            if (denseState.isBottom())
+                return;
+        }
+    }
+
+    // Pointer relations live in AddressDomain. The Boolean result above is
+    // their complete branch refinement; inventing a numerical relation
+    // between pointer Variables would neither refine addresses nor be sound.
+    if (comparison->getOpVar(0)->getType()->isPointerTy())
+        return;
 
     AD::ConstraintKind kind;
     if (!constraintKind(comparison->getPredicate(), kind))

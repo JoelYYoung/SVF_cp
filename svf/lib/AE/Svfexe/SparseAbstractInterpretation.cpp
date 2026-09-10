@@ -136,6 +136,9 @@ AD::AddressSet SemiSparseAbstractInterpretation::getAddressSet(
         return AD::AddressSet::top();
     if (!value->isPointer())
         return AD::AddressSet::bottom();
+    if (value->getId() == IRGraph::NullPtr ||
+            SVFUtil::isa<ConstNullPtrValVar>(value))
+        return AD::AddressSet::singleton(AD::Location::null());
     if (!this->adapter_.contains(*value))
         return AD::AddressSet::top();
     const State& scalars = scalarState();
