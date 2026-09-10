@@ -323,8 +323,7 @@ std::vector<Variable> AddressDomain::nonDefaultVariables() const
         for (std::size_t slot = 0; slot < ValuesPerPage; ++slot)
         {
             if (entry.page->values[slot])
-                variables.emplace_back(static_cast<std::uint32_t>(
-                                           entry.index * ValuesPerPage + slot));
+                variables.push_back(entry.page->values[slot]->variable);
         }
     }
     return variables;
@@ -353,8 +352,7 @@ std::vector<Variable> AddressDomain::nonDefaultVariablesBefore(
         {
             if (!entry.page->values[slot])
                 continue;
-            const Variable variable(static_cast<std::uint32_t>(
-                                        entry.index * ValuesPerPage + slot));
+            const Variable variable = entry.page->values[slot]->variable;
             if (variable.id() < upperBound.id())
                 variables.push_back(variable);
         }
@@ -504,11 +502,15 @@ const AddressSet* AddressDomain::findValue(Variable variable) const
                                   smallValues_->begin(), smallValues_->end(), variable,
                                   [](const Value& value, Variable key)
         {
-            return value.first < key;
+            return value.first.id() < key.id();
         });
-        return iterator != smallValues_->end() && iterator->first == variable
-               ? &iterator->second
-               : nullptr;
+        if (iterator == smallValues_->end() ||
+                iterator->first.id() != variable.id())
+            return nullptr;
+        if (iterator->first != variable)
+            throw std::invalid_argument(
+                "Variable ID was reused with a different numeric type");
+        return &iterator->second;
     }
     const std::size_t pageIndex = variable.id() / ValuesPerPage;
     const auto iterator = std::lower_bound(
@@ -519,9 +521,14 @@ const AddressSet* AddressDomain::findValue(Variable variable) const
     });
     if (iterator == pages_.end() || iterator->index != pageIndex)
         return nullptr;
-    const std::optional<AddressSet>& value =
+    const std::optional<ValueSlot>& value =
         iterator->page->values[variable.id() % ValuesPerPage];
-    return value ? &*value : nullptr;
+    if (!value)
+        return nullptr;
+    if (value->variable != variable)
+        throw std::invalid_argument(
+            "Variable ID was reused with a different numeric type");
+    return &value->addresses;
 }
 
 void AddressDomain::storeValue(Variable variable, AddressSet addresses)
@@ -533,10 +540,14 @@ void AddressDomain::storeValue(Variable variable, AddressSet addresses)
                             values.begin(), values.end(), variable,
                             [](const Value& value, Variable key)
         {
-            return value.first < key;
+            return value.first.id() < key.id();
         });
-        if (iterator != values.end() && iterator->first == variable)
+        if (iterator != values.end() &&
+                iterator->first.id() == variable.id())
         {
+            if (iterator->first != variable)
+                throw std::invalid_argument(
+                    "Variable ID was reused with a different numeric type");
             iterator->second = std::move(addresses);
             return;
         }
@@ -546,12 +557,15 @@ void AddressDomain::storeValue(Variable variable, AddressSet addresses)
             promoteToPages();
         return;
     }
-    std::optional<AddressSet>& slot =
+    std::optional<ValueSlot>& slot =
         writablePage(variable.id() / ValuesPerPage)
         .values[variable.id() % ValuesPerPage];
     if (!slot)
         ++size_;
-    slot = std::move(addresses);
+    else if (slot->variable != variable)
+        throw std::invalid_argument(
+            "Variable ID was reused with a different numeric type");
+    slot = ValueSlot{variable, std::move(addresses)};
 }
 
 void AddressDomain::eraseValue(Variable variable)
@@ -563,10 +577,14 @@ void AddressDomain::eraseValue(Variable variable)
                                   values.begin(), values.end(), variable,
                                   [](const Value& value, Variable key)
         {
-            return value.first < key;
+            return value.first.id() < key.id();
         });
-        if (iterator != values.end() && iterator->first == variable)
+        if (iterator != values.end() &&
+                iterator->first.id() == variable.id())
         {
+            if (iterator->first != variable)
+                throw std::invalid_argument(
+                    "Variable ID was reused with a different numeric type");
             values.erase(iterator);
             --size_;
         }
@@ -583,10 +601,13 @@ void AddressDomain::eraseValue(Variable variable)
         return;
     if (iterator->page.use_count() != 1)
         iterator->page = std::make_shared<ValuePage>(*iterator->page);
-    std::optional<AddressSet>& slot =
+    std::optional<ValueSlot>& slot =
         iterator->page->values[variable.id() % ValuesPerPage];
     if (!slot)
         return;
+    if (slot->variable != variable)
+        throw std::invalid_argument(
+            "Variable ID was reused with a different numeric type");
     slot.reset();
     --size_;
     if (pageIsEmpty(*iterator->page))
@@ -631,7 +652,7 @@ AddressDomain::ValuePage& AddressDomain::writablePage(std::size_t pageIndex)
 bool AddressDomain::pageIsEmpty(const ValuePage& page)
 {
     return std::none_of(page.values.begin(), page.values.end(),
-                        [](const std::optional<AddressSet>& value)
+                        [](const std::optional<ValueSlot>& value)
     {
         return value.has_value();
     });

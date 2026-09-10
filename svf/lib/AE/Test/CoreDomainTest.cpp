@@ -432,6 +432,9 @@ void testAddressDomain()
 
     AddressDomain addresses = AddressDomain::top();
     addresses.assign(p, AddressSet::singleton(first));
+    const Variable mistypedP(p.id(), NumericType::real());
+    requireThrows([&] { (void)addresses.addressSet(mistypedP); },
+                  "small Address storage accepted a reused typed Variable ID");
     AddressDomain copy = addresses;
     copy.assign(p, AddressSet::singleton(second));
     require(addresses.addressSet(p).contains(first) &&
@@ -507,11 +510,20 @@ void testAddressDomain()
     std::vector<Variable> sparseVariables;
     for (std::uint32_t index = 0; index < 40; ++index)
     {
-        const Variable variable(1000 + index * 97);
+        const NumericType type = index % 3 == 0 ? NumericType::integer() :
+                                 index % 3 == 1 ? NumericType::real() :
+                                 NumericType::ieee(FloatFormat::binary32());
+        const Variable variable(1000 + index * 97, type);
         sparseVariables.push_back(variable);
         large.assign(variable,
                      AddressSet::singleton(Location(100 + index)));
     }
+    require(large.nonDefaultVariables() == sparseVariables,
+            "paged Address storage discarded typed Variable identity");
+    const Variable mistypedLarge(sparseVariables[17].id(),
+                                 NumericType::real());
+    requireThrows([&] { (void)large.addressSet(mistypedLarge); },
+                  "paged Address storage accepted a reused typed Variable ID");
     AddressDomain isolatedLarge = large;
     isolatedLarge.assign(sparseVariables[17],
                          AddressSet::singleton(Location(9999)));

@@ -187,9 +187,15 @@ private:
     using Value = std::pair<Variable, AddressSet>;
     using SmallValues = std::vector<Value>;
 
+    struct ValueSlot
+    {
+        Variable variable;
+        AddressSet addresses;
+    };
+
     struct ValuePage
     {
-        std::array<std::optional<AddressSet>, ValuesPerPage> values;
+        std::array<std::optional<ValueSlot>, ValuesPerPage> values;
     };
 
     struct ValuePageEntry
