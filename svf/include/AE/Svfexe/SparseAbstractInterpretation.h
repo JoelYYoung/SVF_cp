@@ -101,6 +101,8 @@ protected:
     State flowState(bool bottom = false) const;
     void forgetActiveScalarValues(State& state) const;
     void forgetMemoryValues(State& state) const;
+    void restoreCallerFrameAfterSharedCallee(
+        State& state, const RetICFGNode* returnSite) const;
     void applyScalarRefinement(State& state, const State& checkpoint);
     void scatterCycleValues(const ICFGCycleWTO* cycle, const State& state);
 
@@ -125,6 +127,12 @@ public:
 
 protected:
     bool mergeStatesFromPredecessors(const ICFGNode* node) override;
+    bool widenCycleState(const AbstractDomain::AbstractDomain& previous,
+                         const AbstractDomain::AbstractDomain& current,
+                         const ICFGCycleWTO* cycle) override;
+    bool narrowCycleState(const AbstractDomain::AbstractDomain& previous,
+                          const AbstractDomain::AbstractDomain& current,
+                          const ICFGCycleWTO* cycle) override;
     void storeValue(const ValVar* pointer,
                     const AbstractDomain::Interval& interval,
                     const AbstractDomain::AddressSet& addresses,
@@ -141,6 +149,10 @@ protected:
                                 const ICFGNode* successor) override;
 
 private:
+    void recordMemoryDefinition(const ICFGNode* node,
+                                const AbstractDomain::AddressSet& targets);
+    bool hasMemoryDefinition(const ICFGNode* node,
+                             AbstractDomain::Variable content) const;
     void pullObjectValueFlows(const ICFGNode* node);
     bool isIndirectSVFGEdgeFeasible(const IndirectSVFGEdge* edge,
                                     const VFGNode* destination);
@@ -153,6 +165,13 @@ private:
     /// Contents changed through analyzer-side models rather than StoreStmt.
     /// SVFG has no defining edge for them, so they retain ICFG propagation.
     std::set<AbstractDomain::Variable> denseMemoryVariables_;
+    /// SVFG definition support is separate from abstract values. A numeric
+    /// Top has no Box slot, but a StoreStmt that produces it must still be
+    /// distinguishable from an SVFG source that contributed no definition.
+    Map<const ICFGNode*, std::set<AbstractDomain::Variable>>
+    memoryDefinitionSupport_;
+    Map<const ICFGNode*, std::set<AbstractDomain::Variable>>
+    previousMemoryDefinitionSupport_;
     std::unique_ptr<SVFGBuilder> svfgBuilder_;
 };
 

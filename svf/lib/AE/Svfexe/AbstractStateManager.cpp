@@ -178,7 +178,8 @@ AD::Interval AbstractInterpretation::getGepByteOffset(const GepStmt* gep)
             {
                 const AD::Interval value = getInterval(variable, node);
                 lower = finiteEndpoint(value.lower(), 0);
-                upper = finiteEndpoint(value.upper(), Options::MaxFieldLimit());
+                upper = finiteEndpoint(value.upper(),
+                                       Options::MaxFieldLimit());
             }
             lower = std::max<s64_t>(0, lower);
             upper = std::max<s64_t>(0, upper);
@@ -209,11 +210,31 @@ AD::Interval AbstractInterpretation::getGepByteOffset(const GepStmt* gep)
 AD::AddressSet AbstractInterpretation::getGepObjAddrs(
     const ValVar* pointer, const AD::Interval& offset, const ICFGNode* node)
 {
-    const AD::AddressSet bases = getAddressSet(pointer, node);
-    if (bases.isTop())
-        return AD::AddressSet::top();
+    AD::AddressSet bases = getAddressSet(pointer, node);
     if (offset.isBottom())
         return AD::AddressSet::bottom();
+
+    if (bases.isBottom() && pointer)
+    {
+        for (NodeID objectId :
+                preAnalysis->getPointerAnalysis()->getPts(pointer->getId()))
+        {
+            const auto* object =
+                SVFUtil::dyn_cast<ObjVar>(svfir->getGNode(objectId));
+            const BaseObjVar* base = object
+                                     ? svfir->getBaseObject(object->getId()) : nullptr;
+            if (object && base && !base->isBlackHoleObj())
+                bases.insert(locationOf(object));
+        }
+    }
+
+    AD::AddressSet result = bases.hasUnknownObject()
+                            ? AD::AddressSet::objectTop()
+                            : AD::AddressSet::bottom();
+    if (bases.mayContainRawAddress())
+        result.joinWith(AD::AddressSet::rawTop());
+    if (bases.hasUnknownObject())
+        return result;
 
     auto integerEndpoint = [](const AD::Bound& bound,
                               bool lower) -> std::optional<APOffset>
@@ -258,7 +279,6 @@ AD::AddressSet AbstractInterpretation::getGepObjAddrs(
         upper = static_cast<APOffset>(Options::MaxFieldLimit());
     }
 
-    AD::AddressSet result = AD::AddressSet::bottom();
     for (APOffset index = *lower;; ++index)
     {
         for (AD::Location base : bases)
@@ -501,6 +521,13 @@ void AbstractInterpretation::assignMemoryValue(
         assignInterval(denseState, content, interval);
     if (addresses.isBottom())
         denseState.addresses().forget(content);
+    else if (addresses.isTop())
+    {
+        // AE deliberately ignores invalid/raw pointer value-flow. Preserve
+        // every modeled object without materializing the sparse full-Top
+        // default as a separate definedness component.
+        denseState.addresses().assign(content, AD::AddressSet::objectTop());
+    }
     else
         denseState.addresses().assign(content, addresses);
 }
@@ -559,8 +586,13 @@ AD::AddressSet AbstractInterpretation::getAddressSet(const ValVar* var,
     if (var->getId() == IRGraph::NullPtr ||
             SVFUtil::isa<ConstNullPtrValVar>(var))
         return AD::AddressSet::singleton(AD::Location::null());
+    if (var->getId() == svfir->getBlkPtr() ||
+            SVFUtil::isa<BlackHoleValVar>(var))
+        return blackHoleAddressSet();
+    if (SVFUtil::isa<DummyValVar>(var))
+        return AD::AddressSet::bottom();
     if (!adapter_.contains(*var))
-        return AD::AddressSet::top();
+        return AD::AddressSet::bottom();
     const State& denseState = ensureState(node);
     const AD::Variable variable = adapter_.variable(*var);
     return denseState.addresses().addressSet(variable);
@@ -571,7 +603,13 @@ AD::AddressSet AbstractInterpretation::getAddressSet(const ObjVar* var,
 {
     const State& denseState = ensureState(node);
     const AD::Variable content = adapter_.contentVariable(*var);
-    return denseState.addresses().addressSet(content);
+    const AD::AddressSet addresses =
+        denseState.addresses().addressSet(content);
+    if (addresses.isTop() &&
+            denseState.lifetimes().statusOf(adapter_.location(*var)) ==
+            AD::Lifetime::Alive)
+        return AD::AddressSet::bottom();
+    return addresses;
 }
 
 AD::AddressSet AbstractInterpretation::getAddressSet(const SVFVar* var,
@@ -601,11 +639,12 @@ bool AbstractInterpretation::hasAbsValue(const ObjVar* var,
         return false;
     // Top is the semantic default and has no physical slot. Treat this query
     // as a materialization test so sparse pulls do not mistake an absent
-    // object for a real incoming definition.
+    // object for a real incoming definition. Inspect both facets: aggregate
+    // and field ObjVars may hold a pointer even when ObjVar::isPointer() does
+    // not expose the stored value's effective type.
     const AD::Variable content = adapter_.contentVariable(*var);
-    return var->isPointer()
-           ? !stateIterator->second.addresses().addressSet(content).isTop()
-           : !stateIterator->second.numerical().bound(content).isTop();
+    return !stateIterator->second.numerical().bound(content).isTop() ||
+           !stateIterator->second.addresses().addressSet(content).isTop();
 }
 
 bool AbstractInterpretation::hasAbsValue(const SVFVar* var,
@@ -706,8 +745,10 @@ void AbstractInterpretation::loadValue(const ValVar* pointer,
         interval = AD::Interval::bottom();
         addresses = AD::AddressSet::bottom();
         const AD::AddressSet pointees = getAddressSet(pointer, node);
-        if (pointees.isTop())
+        if (pointees.hasUnknownObject())
         {
+            if (unknownTargetTelemetryEnabled_)
+                ++unknownTargetTelemetry_.loads;
             interval = AD::Interval::top();
             addresses = AD::AddressSet::top();
             return;
@@ -722,8 +763,10 @@ void AbstractInterpretation::loadValue(const ValVar* pointer,
     State& denseState = ensureState(node);
     materializeValue(denseState, pointer, node);
     const AD::AddressSet pointees = getAddressSet(pointer, node);
-    if (pointees.isTop())
+    if (pointees.hasUnknownObject())
     {
+        if (unknownTargetTelemetryEnabled_)
+            ++unknownTargetTelemetry_.loads;
         interval = AD::Interval::top();
         addresses = AD::AddressSet::top();
         return;
@@ -758,7 +801,9 @@ void AbstractInterpretation::storeValue(const ValVar* pointer,
     if (!adapter_.contains(*pointer))
     {
         const AD::AddressSet pointees = getAddressSet(pointer, node);
-        if (!pointees.isTop())
+        if (pointees.hasUnknownObject() && unknownTargetTelemetryEnabled_)
+            ++unknownTargetTelemetry_.stores;
+        if (!pointees.hasUnknownObject())
         {
             for (AD::Location location : pointees)
                 updateMemoryValue(location, interval, addresses, node);
@@ -768,7 +813,6 @@ void AbstractInterpretation::storeValue(const ValVar* pointer,
     State& denseState = ensureState(node);
     materializeValue(denseState, pointer, node);
     const AD::AddressSet pointees = getAddressSet(pointer, node);
-    const bool strong = pointees.isSingleton();
     auto write = [&](AD::Location location)
     {
         if (!denseState.memoryLayout().contains(location))
@@ -778,7 +822,7 @@ void AbstractInterpretation::storeValue(const ValVar* pointer,
         const ObjVar* object = objectAt(location);
         if (!object)
             return;
-        if (strong)
+        if (pointees.isSingleton())
         {
             assignMemoryValue(denseState, content, interval, addresses);
             return;
@@ -791,11 +835,15 @@ void AbstractInterpretation::storeValue(const ValVar* pointer,
                           joinedAddresses);
     };
 
-    if (pointees.isTop())
+    if (pointees.hasUnknownObject())
     {
+        if (unknownTargetTelemetryEnabled_)
+            ++unknownTargetTelemetry_.stores;
         for (const auto& [location, content] :
                 denseState.memoryLayout().cells())
         {
+            if (unknownTargetTelemetryEnabled_)
+                ++unknownTargetTelemetry_.storeCellsVisited;
             (void)content;
             write(location);
         }

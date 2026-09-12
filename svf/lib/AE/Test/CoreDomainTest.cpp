@@ -356,11 +356,17 @@ void testBoxAddressDomainMemoryFacet()
     state.allocate(object);
     state.assignPointer(pointer, AddressSet::singleton(object));
     state.assignNumeric(source, LinearExpression(Rational(7)));
-    state.store(pointer, source);
+    state.assignMemory(object, source);
     state.load(target, pointer);
     require(
         hasBounds(state.numerical().bound(target), Rational(7), Rational(7)),
         "Box program state did not preserve a strong store/load");
+    state.assignNumeric(source, LinearExpression(Rational(9)));
+    state.joinMemory(object, source);
+    state.load(target, pointer);
+    require(hasBounds(state.numerical().bound(target), Rational(7),
+                      Rational(9)),
+            "Box memory join did not preserve a weak update");
 
     layout.extend(lateObject, lateCell);
     require(state.memoryLayout().contains(lateObject) &&
@@ -369,7 +375,7 @@ void testBoxAddressDomainMemoryFacet()
     state.allocate(lateObject);
     state.assignPointer(pointer, AddressSet::singleton(lateObject));
     state.assignNumeric(source, LinearExpression(Rational(11)));
-    state.store(pointer, source);
+    state.assignMemory(lateObject, source);
     state.load(target, pointer);
     require(hasBounds(state.numerical().bound(target), Rational(11),
                       Rational(11)),
@@ -385,11 +391,36 @@ void testBoxAddressDomainMemoryFacet()
     joined.joinWith(other);
     require(other.isSubsetOf(joined) == CheckResult::True,
             "Box program-state join omitted a component");
+
+    const Location callerLocal(30);
+    const Variable callerCell(102);
+    layout.extend(callerLocal, callerCell);
+    BoxAddressDomain caller(BoxDomain::top(), layout);
+    caller.allocate(callerLocal);
+    caller.assignPointer(callerCell, AddressSet::singleton(object));
+    const BoxAddressDomain callerFrame = caller;
+    BoxAddressDomain unrelatedCaller(BoxDomain::top(), layout);
+    caller.joinWith(unrelatedCaller);
+    caller.restoreMissingMemoryFrom(callerFrame, callerCell);
+    require(caller.addresses().addressSet(callerCell) ==
+            AddressSet::singleton(object),
+            "an absent caller-local object contributed Top at a shared join");
+    require(caller.lifetimes().statusOf(callerLocal) == Lifetime::Alive,
+            "a shared join lost the caller-local object's support");
+
+    BoxAddressDomain explicitUnknown(BoxDomain::top(), layout);
+    explicitUnknown.allocate(callerLocal);
+    explicitUnknown.assignPointer(callerCell, AddressSet::objectTop());
+    caller.joinWith(explicitUnknown);
+    require(caller.addresses().addressSet(callerCell).isObjectTop(),
+            "a materialized unknown memory value was mistaken for absent support");
 }
 
 void testLifetimeDomain()
 {
     const Location object(10);
+    const Location otherObject(20);
+    const Location untouched(30);
     LifetimeDomain alive = LifetimeDomain::bottom();
     alive.allocate(object);
     LifetimeDomain freed = alive;
@@ -405,6 +436,38 @@ void testLifetimeDomain()
     maybeFreed.meetWith(alive);
     require(maybeFreed.statusOf(object) == Lifetime::Alive,
             "lifetime meet did not recover the live alternative");
+
+    LifetimeDomain twoAlive = alive;
+    twoAlive.allocate(otherObject);
+    LifetimeDomain absorbedJoin = twoAlive;
+    absorbedJoin.joinWith(alive);
+    require(absorbedJoin.isEquivalentTo(twoAlive) == CheckResult::True,
+            "lifetime join did not absorb a smaller property");
+
+    LifetimeDomain absorbedMeet = alive;
+    absorbedMeet.meetWith(twoAlive);
+    require(absorbedMeet.isEquivalentTo(alive) == CheckResult::True,
+            "lifetime meet did not absorb a larger property");
+
+    LifetimeDomain unknown = LifetimeDomain::top();
+    require(twoAlive.isSubsetOf(unknown) == CheckResult::True &&
+            unknown.isSubsetOf(twoAlive) == CheckResult::False,
+            "lifetime default-value ordering is inconsistent");
+
+    LifetimeDomain maybeAliveLeft = LifetimeDomain::top();
+    maybeAliveLeft.allocate(object);
+    LifetimeDomain maybeAliveRight = LifetimeDomain::top();
+    maybeAliveRight.allocate(otherObject);
+    LifetimeDomain defaultTopJoin = maybeAliveLeft;
+    defaultTopJoin.joinWith(maybeAliveRight);
+    require(defaultTopJoin.isTop(),
+            "lifetime join with a Top default retained redundant exceptions");
+    LifetimeDomain defaultTopMeet = maybeAliveLeft;
+    defaultTopMeet.meetWith(maybeAliveRight);
+    require(defaultTopMeet.statusOf(object) == Lifetime::Alive &&
+            defaultTopMeet.statusOf(otherObject) == Lifetime::Alive &&
+            defaultTopMeet.statusOf(untouched) == Lifetime::MaybeFreed,
+            "lifetime meet with a Top default lost explicit exceptions");
 }
 
 void testAddressDomain()
@@ -419,6 +482,7 @@ void testAddressDomain()
             "Address bottom did not represent an unreachable property");
     AddressDomain unknown = AddressDomain::top();
     require(unknown.isTop() && unknown.addressSet(p).isTop() &&
+            unknown.addressSet(p).contains(Location::null()) &&
             unknown.nonDefaultVariables().empty(),
             "Address top did not represent an unknown pointer sparsely");
     AddressDomain independentTop = AddressDomain::top();
@@ -429,6 +493,107 @@ void testAddressDomain()
         Location::null().isNull() &&
         AddressSet::singleton(Location::null()).contains(Location::null()),
         "Address domain did not preserve the explicit null location");
+
+    const AddressSet raw = AddressSet::rawTop();
+    const AddressSet rawOrNull = AddressSet::rawOrNull();
+    const AddressSet objectTop = AddressSet::objectTop();
+    require(raw.isRawTop() && raw.mayContainRawAddress() &&
+            !raw.hasUnknownObject() && !raw.contains(first),
+            "raw-top acquired modeled-object provenance");
+    require(objectTop.isObjectTop() && objectTop.hasUnknownObject() &&
+            !objectTop.mayContainRawAddress() && objectTop.contains(first) &&
+            !objectTop.contains(Location::null()),
+            "object-top did not cover modeled objects independently");
+    require(rawOrNull.mayContainRawAddress() &&
+            rawOrNull.contains(Location::null()) &&
+            !rawOrNull.hasUnknownObject() && !rawOrNull.isRawTop(),
+            "raw-or-null acquired object provenance or lost null");
+    AddressSet fullTop = raw;
+    fullTop.joinWith(objectTop);
+    require(!fullTop.isTop() && !fullTop.contains(Location::null()),
+            "non-null object/raw union unexpectedly acquired null");
+    fullTop.insert(Location::null());
+    require(fullTop.isTop(),
+            "object, raw, and null union did not produce full Top");
+    AddressSet objectOrNull = objectTop;
+    objectOrNull.insert(Location::null());
+    require(objectOrNull.hasUnknownObject() &&
+            objectOrNull.contains(Location::null()) &&
+            !objectOrNull.isObjectTop() && !objectOrNull.isTop(),
+            "object-top could not retain an independent null possibility");
+    AddressSet impossibleNull = objectTop;
+    impossibleNull.meetWith(AddressSet::singleton(Location::null()));
+    require(impossibleNull.isBottom() &&
+            !objectTop.hasIntersection(
+                AddressSet::singleton(Location::null())),
+            "object-top intersect null was not empty");
+    objectOrNull.meetWith(AddressSet::singleton(Location::null()));
+    require(objectOrNull.isSingleton() &&
+            objectOrNull.contains(Location::null()),
+            "object-or-null intersection lost the null possibility");
+    AddressSet rawAndKnown = raw;
+    rawAndKnown.insert(first);
+    require(!rawAndKnown.isFinite() && rawAndKnown.size() == 1 &&
+            rawAndKnown.contains(first),
+            "raw plus finite provenance was not represented independently");
+    AddressSet onlyKnown = rawAndKnown;
+    onlyKnown.meetWith(AddressSet::singleton(first));
+    require(onlyKnown.isSingleton() && onlyKnown.contains(first),
+            "Address meet did not remove a disjoint raw component");
+    AddressSet onlyRaw = rawAndKnown;
+    onlyRaw.meetWith(raw);
+    require(onlyRaw.isRawTop(),
+            "Address meet did not remove a disjoint object component");
+    require(raw.isSubsetOf(fullTop) && objectTop.isSubsetOf(fullTop) &&
+            !raw.isSubsetOf(objectTop) && !objectTop.isSubsetOf(raw),
+            "raw/object-top lattice ordering is inconsistent");
+
+    AddressSet twoObjects = AddressSet::singleton(first);
+    twoObjects.insert(second);
+    const std::vector<AddressSet> latticeValues =
+    {
+        AddressSet::bottom(),
+        AddressSet::singleton(Location::null()),
+        AddressSet::singleton(first),
+        twoObjects,
+        raw,
+        rawOrNull,
+        rawAndKnown,
+        objectTop,
+        objectOrNull,
+        fullTop,
+    };
+    const auto concretization = [&](const AddressSet& value)
+    {
+        unsigned bits = 0;
+        bits |= value.contains(Location::null()) ? 1U : 0U;
+        bits |= value.contains(first) ? 2U : 0U;
+        bits |= value.contains(second) ? 4U : 0U;
+        bits |= value.contains(Location(30)) ? 8U : 0U;
+        bits |= value.mayContainRawAddress() ? 16U : 0U;
+        return bits;
+    };
+    for (const AddressSet& lhs : latticeValues)
+    {
+        for (const AddressSet& rhs : latticeValues)
+        {
+            const unsigned lhsBits = concretization(lhs);
+            const unsigned rhsBits = concretization(rhs);
+            AddressSet joinedValue = lhs;
+            joinedValue.joinWith(rhs);
+            AddressSet metValue = lhs;
+            metValue.meetWith(rhs);
+            require(concretization(joinedValue) == (lhsBits | rhsBits),
+                    "Address join disagreed with finite concretization");
+            require(concretization(metValue) == (lhsBits & rhsBits),
+                    "Address meet disagreed with finite concretization");
+            require(lhs.isSubsetOf(rhs) ==
+                    ((lhsBits & ~rhsBits) == 0),
+                    "Address subset disagreed with finite concretization");
+            require(lhs.hasIntersection(rhs) == ((lhsBits & rhsBits) != 0),
+                    "Address intersection disagreed with concretization");
+        }
+    }
 
     AddressDomain addresses = AddressDomain::top();
     addresses.assign(p, AddressSet::singleton(first));
@@ -488,6 +653,13 @@ void testAddressDomain()
     require(!emptyPointer.isBottom() && emptyPointer.addressSet(p).isBottom() &&
             emptyPointer.addressSet(q).isTop(),
             "an empty pointer fact was confused with whole-property Bottom");
+    AddressDomain specialValues = AddressDomain::top();
+    specialValues.assign(p, AddressSet::rawTop());
+    specialValues.assign(q, AddressSet::objectTop());
+    require(specialValues.addressSet(p).isRawTop() &&
+            specialValues.addressSet(q).isObjectTop() &&
+            specialValues.nonDefaultVariables().size() == 2,
+            "AddressDomain did not store raw/object top explicitly");
 
     AddressSet reordered = AddressSet::bottom();
     reordered.insert(Location(40));
@@ -579,7 +751,7 @@ void testAddressDomainDifferential()
             require(variables[index++].id() == variableId,
                     "Address differential support ordering mismatch");
             const AddressSet value = actual.addressSet(Variable(variableId));
-            require(!value.isTop() && value.size() == locations.size(),
+            require(value.isFinite() && value.size() == locations.size(),
                     "Address differential cardinality mismatch");
             for (std::uint32_t location : locations)
                 require(value.contains(Location(location)),

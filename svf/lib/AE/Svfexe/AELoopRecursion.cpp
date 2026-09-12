@@ -86,7 +86,8 @@ void AbstractInterpretation::skipRecursionWithTop(const CallICFGNode* callNode)
                     {
                         const AbstractDomain::AddressSet addresses =
                             getAddressSet(store->getLHSVar(), callNode);
-                        if (!addresses.isBottom() && !addresses.isTop())
+                        if (!addresses.isBottom() &&
+                                !addresses.hasUnknownObject())
                         {
                             for (AbstractDomain::Location location : addresses)
                             {

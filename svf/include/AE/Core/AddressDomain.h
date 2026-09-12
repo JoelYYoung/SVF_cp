@@ -105,7 +105,13 @@ private:
     std::unique_ptr<std::vector<Location>> overflow_;
 };
 
-/// Finite points-to set for one pointer variable, with an explicit top value.
+/// Address value split into modeled-object, null, and raw-address components.
+///
+/// The modeled-object component is either a finite set or all modeled objects.
+/// Null remains an explicit Location even when the object component is Top.
+/// The raw bit records an unmodeled/invalid non-null representation. Keeping
+/// the three components separate prevents integer casts and uninitialized
+/// values from creating spurious flow through every modeled memory object.
 class AddressSet
 {
 public:
@@ -114,11 +120,21 @@ public:
     AddressSet() = default;
 
     static AddressSet bottom();
+    static AddressSet objectTop();
+    /// Any non-null raw address without modeled-object provenance.
+    static AddressSet rawTop();
+    /// Raw addresses plus the explicit null location, still no objects.
+    static AddressSet rawOrNull();
     static AddressSet top();
     static AddressSet singleton(Location location);
 
     bool isBottom() const;
     bool isTop() const;
+    bool isObjectTop() const;
+    bool isRawTop() const;
+    bool hasUnknownObject() const;
+    bool mayContainRawAddress() const;
+    bool isFinite() const;
     bool isSingleton() const;
     bool contains(Location location) const;
     bool hasIntersection(const AddressSet& other) const;
@@ -142,7 +158,9 @@ public:
 
     friend bool operator==(const AddressSet& lhs, const AddressSet& rhs)
     {
-        return lhs.top_ == rhs.top_ && lhs.locations_ == rhs.locations_;
+        return lhs.allObjects_ == rhs.allObjects_ &&
+               lhs.mayContainRawAddress_ == rhs.mayContainRawAddress_ &&
+               lhs.locations_ == rhs.locations_;
     }
     friend bool operator!=(const AddressSet& lhs, const AddressSet& rhs)
     {
@@ -150,16 +168,22 @@ public:
     }
 
 private:
-    explicit AddressSet(bool top) : top_(top) {}
+    AddressSet(bool allObjects, bool mayContainRawAddress)
+        : allObjects_(allObjects),
+          mayContainRawAddress_(mayContainRawAddress)
+    {
+    }
 
-    bool top_ = false;
+    bool allObjects_ = false;
+    bool mayContainRawAddress_ = false;
     FiniteLocationSet locations_;
 };
 
-/// Flow-sensitive address property with finite non-Top support over stable
-/// Variables. Missing entries in every non-Bottom property denote Address Top.
-/// An explicit empty AddressSet is a per-variable fact; it is distinct from
-/// whole-property Bottom, which denotes an unreachable address carrier.
+/// Flow-sensitive address property with sparse non-Top support over stable
+/// Variables. Missing entries in every non-Bottom property denote full
+/// Address Top. Object-top, raw-top, finite sets, and the per-variable empty
+/// set are explicit values. Whole-property Bottom denotes an unreachable
+/// address carrier.
 class AddressDomain final : public AbstractDomain
 {
 public:

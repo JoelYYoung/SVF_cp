@@ -33,16 +33,47 @@ namespace SVF::AbstractDomain
 namespace
 {
 
-template <typename Key, typename Value>
-std::set<Key> combinedKeys(const std::map<Key, Value>& lhs,
-                           const std::map<Key, Value>& rhs)
+template <typename Operation>
+std::map<Location, Lifetime> mergeLifetimeValues(
+    const std::map<Location, Lifetime>& lhs, Lifetime lhsDefault,
+    const std::map<Location, Lifetime>& rhs, Lifetime rhsDefault,
+    Lifetime resultDefault, Operation operation)
 {
-    std::set<Key> keys;
-    for (const auto& entry : lhs)
-        keys.insert(entry.first);
-    for (const auto& entry : rhs)
-        keys.insert(entry.first);
-    return keys;
+    std::map<Location, Lifetime> result;
+    auto lhsIt = lhs.begin();
+    auto rhsIt = rhs.begin();
+    while (lhsIt != lhs.end() || rhsIt != rhs.end())
+    {
+        Location location;
+        Lifetime lhsValue = lhsDefault;
+        Lifetime rhsValue = rhsDefault;
+        if (rhsIt == rhs.end() ||
+                (lhsIt != lhs.end() && lhsIt->first < rhsIt->first))
+        {
+            location = lhsIt->first;
+            lhsValue = lhsIt->second;
+            ++lhsIt;
+        }
+        else if (lhsIt == lhs.end() || rhsIt->first < lhsIt->first)
+        {
+            location = rhsIt->first;
+            rhsValue = rhsIt->second;
+            ++rhsIt;
+        }
+        else
+        {
+            location = lhsIt->first;
+            lhsValue = lhsIt->second;
+            rhsValue = rhsIt->second;
+            ++lhsIt;
+            ++rhsIt;
+        }
+
+        const Lifetime value = operation(lhsValue, rhsValue);
+        if (value != resultDefault)
+            result.emplace_hint(result.end(), location, value);
+    }
+    return result;
 }
 
 Lifetime joinLifetime(Lifetime lhs, Lifetime rhs)
@@ -140,6 +171,9 @@ bool LifetimeDomain::hasCompatibleDomain(const AbstractDomain& other) const
 void LifetimeDomain::joinDomain(const AbstractDomain& other)
 {
     const auto& state = static_cast<const LifetimeDomain&>(other);
+    if (defaultValue_ == state.defaultValue_ &&
+            (values_ == state.values_ || *values_ == *state.values_))
+        return;
     if (state.isBottomDomain())
         return;
     if (isBottomDomain())
@@ -147,17 +181,18 @@ void LifetimeDomain::joinDomain(const AbstractDomain& other)
         *this = state;
         return;
     }
-    const std::set<Location> locations = combinedKeys(*values_, *state.values_);
+    if (state.leqDomain(*this))
+        return;
+    if (leqDomain(state))
+    {
+        *this = state;
+        return;
+    }
     const Lifetime nextDefault =
         joinLifetime(defaultValue_, state.defaultValue_);
-    std::map<Location, Lifetime> next;
-    for (Location location : locations)
-    {
-        const Lifetime value =
-            joinLifetime(statusOf(location), state.statusOf(location));
-        if (value != nextDefault)
-            next.emplace(location, value);
-    }
+    Values next = mergeLifetimeValues(
+                      *values_, defaultValue_, *state.values_, state.defaultValue_,
+                      nextDefault, joinLifetime);
     defaultValue_ = nextDefault;
     values_ = std::make_shared<Values>(std::move(next));
 }
@@ -165,6 +200,9 @@ void LifetimeDomain::joinDomain(const AbstractDomain& other)
 void LifetimeDomain::meetDomain(const AbstractDomain& other)
 {
     const auto& state = static_cast<const LifetimeDomain&>(other);
+    if (defaultValue_ == state.defaultValue_ &&
+            (values_ == state.values_ || *values_ == *state.values_))
+        return;
     if (state.isTopDomain())
         return;
     if (isTopDomain())
@@ -172,17 +210,18 @@ void LifetimeDomain::meetDomain(const AbstractDomain& other)
         *this = state;
         return;
     }
-    const std::set<Location> locations = combinedKeys(*values_, *state.values_);
+    if (leqDomain(state))
+        return;
+    if (state.leqDomain(*this))
+    {
+        *this = state;
+        return;
+    }
     const Lifetime nextDefault =
         meetLifetime(defaultValue_, state.defaultValue_);
-    std::map<Location, Lifetime> next;
-    for (Location location : locations)
-    {
-        const Lifetime value =
-            meetLifetime(statusOf(location), state.statusOf(location));
-        if (value != nextDefault)
-            next.emplace(location, value);
-    }
+    Values next = mergeLifetimeValues(
+                      *values_, defaultValue_, *state.values_, state.defaultValue_,
+                      nextDefault, meetLifetime);
     defaultValue_ = nextDefault;
     values_ = std::make_shared<Values>(std::move(next));
 }
@@ -215,13 +254,35 @@ bool LifetimeDomain::leqDomain(const AbstractDomain& other) const
         return true;
     if (!lifetimeIsSubsetOf(defaultValue_, state.defaultValue_))
         return false;
-    const std::set<Location> locations = combinedKeys(*values_, *state.values_);
-    return std::all_of(locations.begin(), locations.end(),
-                       [&](Location location)
+
+    auto lhsIt = values_->begin();
+    auto rhsIt = state.values_->begin();
+    while (lhsIt != values_->end() || rhsIt != state.values_->end())
     {
-        return lifetimeIsSubsetOf(
-                   statusOf(location), state.statusOf(location));
-    });
+        Lifetime lhsValue = defaultValue_;
+        Lifetime rhsValue = state.defaultValue_;
+        if (rhsIt == state.values_->end() ||
+                (lhsIt != values_->end() && lhsIt->first < rhsIt->first))
+        {
+            lhsValue = lhsIt->second;
+            ++lhsIt;
+        }
+        else if (lhsIt == values_->end() || rhsIt->first < lhsIt->first)
+        {
+            rhsValue = rhsIt->second;
+            ++rhsIt;
+        }
+        else
+        {
+            lhsValue = lhsIt->second;
+            rhsValue = rhsIt->second;
+            ++lhsIt;
+            ++rhsIt;
+        }
+        if (!lifetimeIsSubsetOf(lhsValue, rhsValue))
+            return false;
+    }
+    return true;
 }
 
 std::string LifetimeDomain::domainToString() const
@@ -269,6 +330,33 @@ void MemoryLayout::extend(Location location, Variable content)
     if (!inserted && iterator->second != content)
         throw std::invalid_argument(
             "location already has a different content symbol");
+}
+
+void BoxAddressDomain::restoreMissingMemoryFrom(
+    const BoxAddressDomain& caller, Variable content)
+{
+    if (isBottom() || caller.isBottom())
+        return;
+    if (numerical_.bound(content).isTop())
+    {
+        const Interval interval = caller.numerical_.bound(content);
+        if (!interval.isTop())
+            numerical_.setBound(content, interval);
+    }
+    restoreMissingAddressFrom(caller, content);
+}
+
+void BoxAddressDomain::restoreMissingAddressFrom(
+    const BoxAddressDomain& caller, Variable content)
+{
+    if (isBottom() || caller.isBottom())
+        return;
+    if (addresses_.addressSet(content).isTop())
+    {
+        const AddressSet addresses = caller.addresses_.addressSet(content);
+        if (!addresses.isTop())
+            addresses_.assign(content, addresses);
+    }
 }
 
 } // namespace SVF::AbstractDomain

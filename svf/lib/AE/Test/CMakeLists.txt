@@ -80,12 +80,20 @@ if(TARGET SvfLLVM)
       UnknownCallerPointerFlow.ll ${sparsity}
     )
     add_box_ae_test(
+      box-ae-weak-pointer-store-${sparsity}
+      WeakPointerStoreFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
       box-ae-pointer-ordering-${sparsity}
       PointerOrderingFlow.ll ${sparsity}
     )
     add_box_ae_test(
       box-ae-negative-gep-${sparsity}
       NegativeGepFlow.ll ${sparsity}
+    )
+    add_box_ae_test(
+      box-ae-explicit-top-merge-${sparsity}
+      SparseExplicitTopMerge.ll ${sparsity}
     )
   endforeach()
   add_box_ae_test(

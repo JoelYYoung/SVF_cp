@@ -28,6 +28,7 @@
 #include "SVFIR/SVFIR.h"
 #include "Util/Options.h"
 
+#include <algorithm>
 #include <optional>
 #include <set>
 
@@ -139,8 +140,13 @@ AD::AddressSet SemiSparseAbstractInterpretation::getAddressSet(
     if (value->getId() == IRGraph::NullPtr ||
             SVFUtil::isa<ConstNullPtrValVar>(value))
         return AD::AddressSet::singleton(AD::Location::null());
+    if (value->getId() == this->svfir->getBlkPtr() ||
+            SVFUtil::isa<BlackHoleValVar>(value))
+        return this->blackHoleAddressSet();
+    if (SVFUtil::isa<DummyValVar>(value))
+        return AD::AddressSet::bottom();
     if (!this->adapter_.contains(*value))
-        return AD::AddressSet::top();
+        return AD::AddressSet::bottom();
     const State& scalars = scalarState();
     const AD::Variable variable = this->adapter_.variable(*value);
     return scalars.addresses().addressSet(variable);
@@ -162,8 +168,10 @@ void SemiSparseAbstractInterpretation::updateValue(
 {
     (void)node;
     if (value && this->adapter_.contains(*value))
+    {
         this->assignValue(scalarState(), this->adapter_.variable(*value),
                           interval, addresses);
+    }
 }
 
 void SemiSparseAbstractInterpretation::copyAbstractState(
@@ -205,6 +213,87 @@ void SemiSparseAbstractInterpretation::forgetMemoryValues(
     {
         if (this->adapter_.contentObject(variable))
             this->forgetValue(denseState, variable);
+    }
+}
+
+void SemiSparseAbstractInterpretation::restoreCallerFrameAfterSharedCallee(
+    State& denseState, const RetICFGNode* returnSite) const
+{
+    if (!returnSite)
+        return;
+    const CallICFGNode* call = returnSite->getCallICFGNode();
+    if (!call || !this->hasAbsState(call))
+        return;
+
+    bool sharedCallee = false;
+    for (const ICFGEdge* edge : returnSite->getInEdges())
+    {
+        if (!SVFUtil::isa<RetCFGEdge>(edge) || !edge->getSrcNode()->getFun())
+            continue;
+        const ICFGNode* entry = this->icfg->getFunEntryICFGNode(
+                                    edge->getSrcNode()->getFun());
+        const std::size_t callers = std::count_if(
+                                        entry->getInEdges().begin(), entry->getInEdges().end(),
+                                        [](const ICFGEdge* incoming)
+        {
+            return SVFUtil::isa<CallCFGEdge>(incoming);
+        });
+        sharedCallee |= callers > 1;
+    }
+    if (!sharedCallee)
+        return;
+
+    const State& caller = this->state(call);
+    NodeBS exposedBases;
+    bool exposesAllObjects = false;
+    auto expose = [&](const ObjVar* object)
+    {
+        if (object)
+            exposedBases.set(
+                this->svfir->getBaseObject(object->getId())->getId());
+    };
+    for (const ValVar* actual : call->getActualParms())
+    {
+        if (!actual || !actual->isPointer())
+            continue;
+        for (NodeID objectId :
+                this->preAnalysis->getPointerAnalysis()->getPts(actual->getId()))
+        {
+            expose(SVFUtil::dyn_cast<ObjVar>(
+                       this->svfir->getGNode(objectId)));
+        }
+        if (!this->adapter_.contains(*actual))
+            continue;
+        const AD::AddressSet addresses = caller.addresses().addressSet(
+                                             this->adapter_.variable(*actual));
+        if (addresses.hasUnknownObject())
+        {
+            exposesAllObjects = true;
+            continue;
+        }
+        for (AD::Location location : addresses)
+            expose(this->objectAt(location));
+    }
+
+    auto restore = [&](AD::Variable content)
+    {
+        const ObjVar* object = this->adapter_.contentObject(content);
+        const BaseObjVar* base = object
+                                 ? this->svfir->getBaseObject(object->getId()) : nullptr;
+        if (!base)
+            return;
+        if (base->isStack() && !exposesAllObjects &&
+                !exposedBases.test(base->getId()))
+            denseState.restoreMissingMemoryFrom(caller, content);
+        else
+            denseState.restoreMissingAddressFrom(caller, content);
+    };
+    for (AD::Variable content : caller.numerical().constrainedVariables())
+        restore(content);
+    for (AD::Variable content : caller.addresses().nonDefaultVariables())
+    {
+        if (caller.numerical().bound(content).isTop())
+            restore(content);
     }
 }
 
@@ -339,6 +428,8 @@ bool SemiSparseAbstractInterpretation::mergeStatesFromPredecessors(
 
     if (!hasFeasiblePredecessor)
         return false;
+    restoreCallerFrameAfterSharedCallee(
+        merged, SVFUtil::dyn_cast<RetICFGNode>(node));
     if (mergedRefinement && !refinementIsTop && !mergedRefinement->isTop())
     {
         refinementTrace_.insert_or_assign(node, *mergedRefinement);
@@ -466,13 +557,57 @@ void FullSparseAbstractInterpretation::storeValue(
 {
     const AD::AddressSet addresses = Base::getAddressSet(pointer, node);
     auto refinement = memoryRefinementTrace_.find(node);
-    if (refinement != memoryRefinementTrace_.end() && !addresses.isTop())
+    if (refinement != memoryRefinementTrace_.end() &&
+            !addresses.hasUnknownObject())
     {
         for (AD::Location location : addresses)
             if (const ObjVar* object = this->objectAt(location))
                 refinement->second.erase(object->getId());
     }
     Base::storeValue(pointer, interval, valueAddresses, node);
+    recordMemoryDefinition(node, addresses);
+}
+
+void FullSparseAbstractInterpretation::recordMemoryDefinition(
+    const ICFGNode* node, const AD::AddressSet& targets)
+{
+    auto record = [&](AD::Location location)
+    {
+        if (location.isNull() ||
+                !this->adapter_.memoryLayout().contains(location))
+            return;
+        const ObjVar* object = this->objectAt(location);
+        if (!object || Base::hasAbsValue(object, node))
+            return;
+        memoryDefinitionSupport_[node].insert(
+            this->adapter_.memoryLayout().contentOf(location));
+    };
+
+    if (targets.hasUnknownObject())
+    {
+        for (const auto& [location, content] :
+                this->adapter_.memoryLayout().cells())
+        {
+            if (this->unknownTargetTelemetryEnabled())
+                ++this->unknownTargetTelemetry()
+                .sparseDefinitionCellsVisited;
+            (void)content;
+            record(location);
+        }
+    }
+    else
+    {
+        for (AD::Location location : targets.locations())
+            record(location);
+    }
+}
+
+bool FullSparseAbstractInterpretation::hasMemoryDefinition(
+    const ICFGNode* node, AD::Variable content) const
+{
+    const auto support = memoryDefinitionSupport_.find(node);
+    return support != memoryDefinitionSupport_.end() &&
+           support->second.count(content) != 0;
 }
 
 void FullSparseAbstractInterpretation::updateMemoryValue(
@@ -492,6 +627,14 @@ bool FullSparseAbstractInterpretation::mergeStatesFromPredecessors(
     const ICFGNode* node)
 {
     memoryRefinementTrace_.erase(node);
+    previousMemoryDefinitionSupport_.erase(node);
+    const auto oldSupport = memoryDefinitionSupport_.find(node);
+    if (oldSupport != memoryDefinitionSupport_.end() &&
+            !oldSupport->second.empty())
+    {
+        previousMemoryDefinitionSupport_.emplace(node, oldSupport->second);
+    }
+    memoryDefinitionSupport_.erase(node);
     if (!Base::mergeStatesFromPredecessors(node))
         return false;
     // A direct object constraint collected from one incoming branch cannot be
@@ -503,6 +646,40 @@ bool FullSparseAbstractInterpretation::mergeStatesFromPredecessors(
     pullObjectValueFlows(node);
     propagateAndApplyMemoryRefinement(node);
     return true;
+}
+
+bool FullSparseAbstractInterpretation::widenCycleState(
+    const AD::AbstractDomain& previous, const AD::AbstractDomain& current,
+    const ICFGCycleWTO* cycle)
+{
+    const ICFGNode* head = cycle->head()->getICFGNode();
+    const auto old = previousMemoryDefinitionSupport_.find(head);
+    const std::set<AD::Variable> empty;
+    const std::set<AD::Variable>& oldSupport =
+        old == previousMemoryDefinitionSupport_.end() ? empty : old->second;
+    auto& support = memoryDefinitionSupport_[head];
+    support.insert(oldSupport.begin(), oldSupport.end());
+    const bool supportFixpoint = support == oldSupport;
+    if (support.empty())
+        memoryDefinitionSupport_.erase(head);
+    return Base::widenCycleState(previous, current, cycle) &&
+           supportFixpoint;
+}
+
+bool FullSparseAbstractInterpretation::narrowCycleState(
+    const AD::AbstractDomain& previous, const AD::AbstractDomain& current,
+    const ICFGCycleWTO* cycle)
+{
+    const ICFGNode* head = cycle->head()->getICFGNode();
+    const auto old = previousMemoryDefinitionSupport_.find(head);
+    const auto next = memoryDefinitionSupport_.find(head);
+    const bool oldEmpty = old == previousMemoryDefinitionSupport_.end();
+    const bool nextEmpty = next == memoryDefinitionSupport_.end();
+    const bool supportFixpoint =
+        (oldEmpty && nextEmpty) ||
+        (!oldEmpty && !nextEmpty && old->second == next->second);
+    return Base::narrowCycleState(previous, current, cycle) &&
+           supportFixpoint;
 }
 
 void FullSparseAbstractInterpretation::pullObjectValueFlows(
@@ -554,7 +731,12 @@ void FullSparseAbstractInterpretation::pullObjectValueFlows(
                         continue;
                     const auto* object = SVFUtil::dyn_cast<ObjVar>(
                                              this->svfir->getGNode(fieldId));
-                    if (!object || !Base::hasAbsValue(object, source))
+                    if (!object)
+                        continue;
+                    const AD::Variable content =
+                        this->adapter_.contentVariable(*object);
+                    if (!Base::hasAbsValue(object, source) &&
+                            !hasMemoryDefinition(source, content))
                         continue;
 
                     AD::Interval interval = AD::Interval::bottom();
@@ -567,6 +749,8 @@ void FullSparseAbstractInterpretation::pullObjectValueFlows(
                     interval.joinWith(Base::getInterval(object, source));
                     addresses.joinWith(Base::getAddressSet(object, source));
                     Base::updateValue(object, interval, addresses, node);
+                    if (!Base::hasAbsValue(object, node))
+                        memoryDefinitionSupport_[node].insert(content);
                     pulledObjects.set(fieldId);
                 }
             }

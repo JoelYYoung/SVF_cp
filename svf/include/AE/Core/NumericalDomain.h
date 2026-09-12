@@ -561,6 +561,8 @@ struct BoxSemanticConfig
 /// typed Variables. Variable IDs are the global sparse page coordinates.
 class BoxDomain final : public NumericalDomain
 {
+    friend class BoxAddressDomain;
+
 public:
     using NumericalDomain::assignParallel;
     using NumericalDomain::bound;

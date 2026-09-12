@@ -76,7 +76,7 @@ void BufOverflowDetector::detect(const ICFGNode* node)
                 updateGepObjOffsetFromBase(node, lhsVal, rhsVal,
                                            ae.getGepByteOffset(gep));
 
-                if (rhsVal.isTop())
+                if (rhsVal.hasUnknownObject())
                     continue;
                 for (AD::Location location : rhsVal)
                 {
@@ -400,7 +400,7 @@ void BufOverflowDetector::updateGepObjOffsetFromBase(const ICFGNode* node,
     auto& ae = AbstractInterpretation::getAEInstance();
     (void)node;
 
-    if (gepAddrs.isTop() || objAddrs.isTop())
+    if (gepAddrs.hasUnknownObject() || objAddrs.hasUnknownObject())
         return;
 
     for (AD::Location objLocation : objAddrs)
@@ -540,7 +540,7 @@ bool BufOverflowDetector::canSafelyAccessMemory(const ValVar* value,
     auto& ae = AbstractInterpretation::getAEInstance();
 
     const AD::AddressSet ptrVal = ae.getAddressSet(value, node);
-    if (ptrVal.isBottom() || ptrVal.isTop())
+    if (ptrVal.isBottom() || !ptrVal.isFinite())
         return false;
     for (AD::Location location : ptrVal)
     {
@@ -771,13 +771,17 @@ bool NullptrDerefDetector::canSafelyDerefPtr(const ValVar* value,
 {
     auto& ae = AbstractInterpretation::getAEInstance();
     const AD::AddressSet addresses = ae.getAddressSet(value, node);
-    if (addresses.isBottom() || addresses.isTop())
+    if (addresses.isBottom() || !addresses.isFinite())
         return false;
     for (AD::Location location : addresses)
     {
         if (location.isNull())
             return false;
-        if (!ae.objectAt(location) || ae.isFreedMemory(location, node))
+        const ObjVar* object = ae.objectAt(location);
+        const BaseObjVar* base =
+            object ? PAG::getPAG()->getBaseObject(object->getId()) : nullptr;
+        if (!base || base->isBlackHoleObj() ||
+                ae.isFreedMemory(location, node))
             return false;
     }
     return true;

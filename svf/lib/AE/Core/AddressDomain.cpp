@@ -124,12 +124,31 @@ bool operator==(const FiniteLocationSet& lhs, const FiniteLocationSet& rhs)
 
 AddressSet AddressSet::bottom()
 {
-    return AddressSet(false);
+    return AddressSet(false, false);
+}
+
+AddressSet AddressSet::objectTop()
+{
+    return AddressSet(true, false);
+}
+
+AddressSet AddressSet::rawTop()
+{
+    return AddressSet(false, true);
+}
+
+AddressSet AddressSet::rawOrNull()
+{
+    AddressSet result = rawTop();
+    result.insert(Location::null());
+    return result;
 }
 
 AddressSet AddressSet::top()
 {
-    return AddressSet(true);
+    AddressSet result(true, true);
+    result.insert(Location::null());
+    return result;
 }
 
 AddressSet AddressSet::singleton(Location location)
@@ -141,30 +160,77 @@ AddressSet AddressSet::singleton(Location location)
 
 bool AddressSet::isBottom() const
 {
-    return !top_ && locations_.empty();
+    return !allObjects_ && !mayContainRawAddress_ && locations_.empty();
 }
 
 bool AddressSet::isTop() const
 {
-    return top_;
+    return allObjects_ && mayContainRawAddress_ &&
+           locations_.contains(Location::null());
+}
+
+bool AddressSet::isObjectTop() const
+{
+    return allObjects_ && !mayContainRawAddress_ && locations_.empty();
+}
+
+bool AddressSet::isRawTop() const
+{
+    return !allObjects_ && mayContainRawAddress_ && locations_.empty();
+}
+
+bool AddressSet::hasUnknownObject() const
+{
+    return allObjects_;
+}
+
+bool AddressSet::mayContainRawAddress() const
+{
+    return mayContainRawAddress_;
+}
+
+bool AddressSet::isFinite() const
+{
+    return !allObjects_ && !mayContainRawAddress_;
 }
 
 bool AddressSet::isSingleton() const
 {
-    return !top_ && locations_.size() == 1;
+    return isFinite() && locations_.size() == 1;
 }
 
 bool AddressSet::contains(Location location) const
 {
-    return top_ || locations_.contains(location);
+    return (allObjects_ && !location.isNull()) ||
+           locations_.contains(location);
 }
 
 bool AddressSet::hasIntersection(const AddressSet& other) const
 {
     if (isBottom() || other.isBottom())
         return false;
-    if (isTop() || other.isTop())
+    if (mayContainRawAddress_ && other.mayContainRawAddress_)
         return true;
+    if (allObjects_ && other.allObjects_)
+        return true;
+    if (allObjects_)
+    {
+        if (std::any_of(other.locations_.begin(), other.locations_.end(),
+                        [](Location location)
+    {
+        return !location.isNull();
+        }))
+        return true;
+    }
+    if (other.allObjects_)
+    {
+        if (std::any_of(locations_.begin(), locations_.end(),
+                        [](Location location)
+    {
+        return !location.isNull();
+        }))
+        return true;
+    }
     const auto* smaller = &locations_;
     const auto* larger = &other.locations_;
     if (larger->size() < smaller->size())
@@ -177,8 +243,8 @@ bool AddressSet::hasIntersection(const AddressSet& other) const
 
 std::size_t AddressSet::size() const
 {
-    if (top_)
-        throw std::logic_error("top address set has no finite size");
+    if (allObjects_)
+        throw std::logic_error("object-top address set has no finite size");
     return locations_.size();
 }
 
@@ -189,25 +255,33 @@ bool AddressSet::empty() const
 
 const FiniteLocationSet& AddressSet::locations() const
 {
-    if (top_)
-        throw std::logic_error("top address set has no finite enumeration");
+    if (allObjects_)
+        throw std::logic_error(
+            "object-top address set has no finite enumeration");
     return locations_;
 }
 
 void AddressSet::insert(Location location)
 {
-    if (top_)
+    if (allObjects_ && !location.isNull())
         return;
     locations_.insert(location);
 }
 
 void AddressSet::joinWith(const AddressSet& other)
 {
-    if (top_ || other.isBottom())
+    if (other.isBottom())
         return;
-    if (other.top_)
+    const bool includeNull = contains(Location::null()) ||
+                             other.contains(Location::null());
+    mayContainRawAddress_ =
+        mayContainRawAddress_ || other.mayContainRawAddress_;
+    if (allObjects_ || other.allObjects_)
     {
-        *this = top();
+        allObjects_ = true;
+        locations_ = FiniteLocationSet();
+        if (includeNull)
+            locations_.insert(Location::null());
         return;
     }
     if (locations_.size() <= 2 && other.locations_.size() <= 2)
@@ -226,50 +300,96 @@ void AddressSet::joinWith(const AddressSet& other)
 
 void AddressSet::meetWith(const AddressSet& other)
 {
-    if (other.top_ || isBottom())
-        return;
-    if (top_)
+    const bool raw = mayContainRawAddress_ &&
+                     other.mayContainRawAddress_;
+    const bool includeNull = contains(Location::null()) &&
+                             other.contains(Location::null());
+    const bool objects = allObjects_ && other.allObjects_;
+    FiniteLocationSet intersection;
+    if (allObjects_ && !other.allObjects_)
     {
-        *this = other;
-        return;
-    }
-    if (locations_.size() <= 2 && other.locations_.size() <= 2)
-    {
-        FiniteLocationSet intersection;
-        for (Location location : locations_)
-        {
-            if (other.locations_.contains(location))
+        for (Location location : other.locations_)
+            if (!location.isNull())
                 intersection.insert(location);
-        }
-        locations_ = std::move(intersection);
-        return;
     }
-    std::vector<Location> intersection;
-    intersection.reserve(std::min(locations_.size(), other.locations_.size()));
-    std::set_intersection(locations_.begin(), locations_.end(),
-                          other.locations_.begin(), other.locations_.end(),
-                          std::back_inserter(intersection));
-    locations_.assign(std::move(intersection));
+    else if (!allObjects_ && other.allObjects_)
+    {
+        for (Location location : locations_)
+            if (!location.isNull())
+                intersection.insert(location);
+    }
+    else if (!allObjects_ && !other.allObjects_)
+    {
+        if (locations_.size() <= 2 && other.locations_.size() <= 2)
+        {
+            for (Location location : locations_)
+            {
+                if (!location.isNull() &&
+                        other.locations_.contains(location))
+                    intersection.insert(location);
+            }
+        }
+        else
+        {
+            std::vector<Location> common;
+            common.reserve(
+                std::min(locations_.size(), other.locations_.size()));
+            std::set_intersection(locations_.begin(), locations_.end(),
+                                  other.locations_.begin(),
+                                  other.locations_.end(),
+                                  std::back_inserter(common));
+            common.erase(std::remove_if(common.begin(), common.end(),
+                                        [](Location location)
+            {
+                return location.isNull();
+            }), common.end());
+            intersection.assign(std::move(common));
+        }
+    }
+    if (includeNull)
+        intersection.insert(Location::null());
+    allObjects_ = objects;
+    mayContainRawAddress_ = raw;
+    locations_ = std::move(intersection);
 }
 
 bool AddressSet::isSubsetOf(const AddressSet& other) const
 {
-    if (other.top_ || isBottom())
-        return true;
-    if (top_)
+    if (mayContainRawAddress_ && !other.mayContainRawAddress_)
         return false;
-    return std::includes(other.locations_.begin(), other.locations_.end(),
-                         locations_.begin(), locations_.end());
+    if (contains(Location::null()) && !other.contains(Location::null()))
+        return false;
+    if (allObjects_ && !other.allObjects_)
+        return false;
+    for (Location location : locations_)
+    {
+        if (!location.isNull() && !other.contains(location))
+            return false;
+    }
+    return true;
 }
 
 std::string AddressSet::toString() const
 {
-    if (top_)
+    if (isTop())
         return "top";
-    if (locations_.empty())
+    if (isObjectTop())
+        return "object-top";
+    if (isRawTop())
+        return "raw-top";
+    if (isBottom())
         return "bottom";
+    if (allObjects_)
+    {
+        std::string result = mayContainRawAddress_
+                             ? "raw+object-top"
+                             : "object-top";
+        if (contains(Location::null()))
+            result += "+null";
+        return result;
+    }
     std::ostringstream output;
-    output << "{";
+    output << (mayContainRawAddress_ ? "raw+{" : "{");
     bool first = true;
     for (Location location : locations_)
     {
@@ -454,10 +574,45 @@ bool AddressDomain::leqDomain(const AbstractDomain& other) const
         return true;
     if (address.bottom_)
         return false;
-    for (Variable variable : address.nonDefaultVariables())
+    if (size_ < address.size_)
+        return false;
+
+    auto pairIsBelow = [&](const Value& right)
     {
-        if (!addressSet(variable).isSubsetOf(address.addressSet(variable)))
+        const AddressSet* left = findValue(right.first);
+        return left && left->isSubsetOf(right.second);
+    };
+
+    if (!address.paged_)
+        return std::all_of(address.smallValues_->begin(),
+                           address.smallValues_->end(), pairIsBelow);
+
+    if (!paged_)
+        return false;
+
+    std::size_t leftPage = 0;
+    for (const ValuePageEntry& rightPage : address.pages_)
+    {
+        while (leftPage < pages_.size() &&
+                pages_[leftPage].index < rightPage.index)
+            ++leftPage;
+        if (leftPage == pages_.size() ||
+                pages_[leftPage].index != rightPage.index)
             return false;
+        if (pages_[leftPage].page == rightPage.page)
+            continue;
+        for (std::size_t slot = 0; slot < ValuesPerPage; ++slot)
+        {
+            const std::optional<ValueSlot>& right =
+                rightPage.page->values[slot];
+            if (!right)
+                continue;
+            const std::optional<ValueSlot>& left =
+                pages_[leftPage].page->values[slot];
+            if (!left || left->variable != right->variable ||
+                    !left->addresses.isSubsetOf(right->addresses))
+                return false;
+        }
     }
     return true;
 }

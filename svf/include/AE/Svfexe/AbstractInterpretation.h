@@ -248,6 +248,11 @@ protected:
     /// Factory-only construction. External callers use getAEInstance().
     AbstractInterpretation();
 
+    /// SVF's BlackHole is an explicit summary object in the current transfer
+    /// policy, not AddressSet object-top. Keeping its Location concrete
+    /// matches the pointer-analysis value-flow contract while AddressSet still
+    /// supports object-top for clients that require arbitrary modeled objects.
+    AbstractDomain::AddressSet blackHoleAddressSet() const;
     // ---- Cycle helpers implemented by Box-backed execution modes ----
     // The dense versions write only to trace[cycle_head].  The semi-sparse
     // subclass adds def-site scatter on top for body ValVars.
@@ -396,6 +401,23 @@ protected:
     AbsExtAPI* utils;
 
 protected:
+    struct UnknownTargetTelemetry
+    {
+        std::uint64_t loads = 0;
+        std::uint64_t stores = 0;
+        std::uint64_t storeCellsVisited = 0;
+        std::uint64_t sparseDefinitionCellsVisited = 0;
+    };
+
+    bool unknownTargetTelemetryEnabled() const
+    {
+        return unknownTargetTelemetryEnabled_;
+    }
+    UnknownTargetTelemetry& unknownTargetTelemetry()
+    {
+        return unknownTargetTelemetry_;
+    }
+
     State& ensureState(const ICFGNode* node);
     const State& state(const ICFGNode* node) const;
     State topState() const;
@@ -422,6 +444,8 @@ protected:
     AEWTO* preAnalysis{nullptr};
     SVFIRAdapter adapter_;
     Map<const ICFGNode*, State> stateTrace_;
+    bool unknownTargetTelemetryEnabled_ = false;
+    UnknownTargetTelemetry unknownTargetTelemetry_;
 
     bool shouldApplyNarrowing(const FunObjVar* fun);
 };

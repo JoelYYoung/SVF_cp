@@ -1,6 +1,5 @@
-; A context-insensitive scalar carrier must join a known pointer with an
-; unknown pointer at the same formal parameter instead of retaining whichever
-; caller happened to be analyzed last.
+; Original-compatible AE ignores the integer-derived actual. The known caller
+; must remain precise without manufacturing modeled-object value flow.
 
 define i32 @read_pointer(ptr %unknown_pointer_argument) {
 entry:

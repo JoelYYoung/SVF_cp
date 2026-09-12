@@ -137,9 +137,13 @@ struct StorageObservation
             if (addresses.isTop())
                 throw std::runtime_error(
                     "Address non-default support contains Top");
-            finitePointees += addresses.size();
-            largestAddressSet = std::max(largestAddressSet, addresses.size());
-            addressSetSizes.push_back(addresses.size());
+            if (!addresses.hasUnknownObject())
+            {
+                finitePointees += addresses.size();
+                largestAddressSet =
+                    std::max(largestAddressSet, addresses.size());
+                addressSetSizes.push_back(addresses.size());
+            }
         }
         addressPages8 += pages8.size();
         addressPages16 += pages16.size();
@@ -364,8 +368,21 @@ std::string canonicalAddressSet(const AD::AddressSet& addresses,
 {
     if (addresses.isTop())
         return "top";
+    if (addresses.isObjectTop())
+        return "object-top";
+    if (addresses.isRawTop())
+        return "raw-top";
     if (addresses.isBottom())
         return "bottom";
+    if (addresses.hasUnknownObject())
+    {
+        std::string result = addresses.mayContainRawAddress()
+                             ? "raw+object-top"
+                             : "object-top";
+        if (addresses.contains(AD::Location::null()))
+            result += "+null";
+        return result;
+    }
     std::vector<std::string> objects;
     objects.reserve(addresses.size());
     for (AD::Location location : addresses.locations())
@@ -382,11 +399,13 @@ std::string canonicalAddressSet(const AD::AddressSet& addresses,
         objects.push_back(memoryObjectKey(object));
     }
     std::sort(objects.begin(), objects.end());
-    std::string result = "{";
+    std::string result = addresses.mayContainRawAddress() ? "raw+{" : "{";
+    bool first = true;
     for (const std::string& object : objects)
     {
-        if (result.size() != 1)
+        if (!first)
             result += ',';
+        first = false;
         result += keyPart(object);
     }
     return result + '}';
@@ -601,7 +620,7 @@ void validateGlobalGepInitializers(
             continue;
         const AD::AddressSet addresses =
             analysis.getAddressSet(gep->getLHSVar(), global);
-        if (addresses.isTop() || addresses.isBottom() ||
+        if (!addresses.isFinite() || addresses.isBottom() ||
                 addresses.contains(AD::Location::null()))
             throw std::runtime_error(
                 "global constant GEP lost its non-null address");
@@ -760,8 +779,12 @@ std::string stateShape(const BoxAddressDomain& state)
     {
         const AD::AddressSet value = state.addresses().addressSet(variable);
         const bool containsNull = value.contains(AD::Location::null());
-        addresses.push_back(std::to_string(value.size()) +
-                            (containsNull ? "n" : "x"));
+        std::string shape = value.hasUnknownObject()
+                            ? "o"
+                            : "f" + std::to_string(value.size());
+        shape += value.mayContainRawAddress() ? "r" : "m";
+        shape += containsNull ? "n" : "x";
+        addresses.push_back(std::move(shape));
     }
     std::sort(addresses.begin(), addresses.end());
 
@@ -909,8 +932,8 @@ void validateSparseMemoryRefinement(const SVFIR& graph,
             "Box sparse memory refinement did not reach the second load");
 }
 
-void validateConservativeUnknownCasts(const SVFIR& graph,
-                                      AbstractInterpretation& analysis)
+void validateAddressKinds(const SVFIR& graph,
+                          AbstractInterpretation& analysis)
 {
     auto findScalar = [&](const char* name) -> const ValVar*
     {
@@ -919,27 +942,51 @@ void validateConservativeUnknownCasts(const SVFIR& graph,
     };
     const ValVar* unknownInteger = findScalar("unknown_integer");
     const ValVar* unknownPointer = findScalar("unknown_pointer");
+    const ValVar* invalidPointer = findScalar("invalid_pointer");
     const ValVar* nullPointer = findScalar("null_pointer");
-    if (!unknownInteger && !unknownPointer && !nullPointer)
+    const ValVar* externalPointer = findScalar("external_pointer");
+    const auto* blackHole = SVFUtil::dyn_cast<ValVar>(
+                                graph.getGNode(graph.getBlkPtr()));
+    const auto* blackHoleObject = SVFUtil::dyn_cast<ObjVar>(
+                                      graph.getGNode(IRGraph::BlackHole));
+    if (!unknownInteger && !unknownPointer && !invalidPointer &&
+            !nullPointer && !externalPointer)
         return;
-    if (!unknownInteger || !unknownPointer || !nullPointer)
+    if (!unknownInteger || !unknownPointer || !invalidPointer ||
+            !nullPointer || !externalPointer || !blackHole ||
+            !blackHoleObject)
         throw std::runtime_error("unknown-cast fixture is incomplete");
 
     bool sawUnknownInteger = false;
     bool sawUnknownPointer = false;
+    bool sawInvalidPointer = false;
     bool sawNullPointer = false;
+    bool sawBlackHoleSummary = false;
+    bool sawExternalSummary = false;
+    const AD::Location blackHoleLocation =
+        analysis.locationOf(blackHoleObject);
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
     {
         sawUnknownInteger |= analysis.getInterval(unknownInteger, node).isTop();
         sawUnknownPointer |=
-            analysis.getAddressSet(unknownPointer, node).isTop();
-        const AD::AddressSet nulls = analysis.getAddressSet(nullPointer, node);
+            analysis.getAddressSet(unknownPointer, node).isBottom();
+        sawInvalidPointer |=
+            analysis.getAddressSet(invalidPointer, node).isBottom();
         sawNullPointer |=
-            nulls.isSingleton() && nulls.contains(AD::Location::null());
+            analysis.getAddressSet(nullPointer, node).isBottom();
+        const AD::AddressSet blackHoleAddresses =
+            analysis.getAddressSet(blackHole, node);
+        sawBlackHoleSummary |= blackHoleAddresses.isSingleton() &&
+                               blackHoleAddresses.contains(blackHoleLocation);
+        const AD::AddressSet externalAddresses =
+            analysis.getAddressSet(externalPointer, node);
+        sawExternalSummary |= externalAddresses.contains(blackHoleLocation);
     }
-    if (!sawUnknownInteger || !sawUnknownPointer || !sawNullPointer)
+    if (!sawUnknownInteger || !sawUnknownPointer || !sawInvalidPointer ||
+            !sawNullPointer || !sawBlackHoleSummary || !sawExternalSummary)
         throw std::runtime_error(
-            "typed Top or inttoptr conservative fallback was not preserved");
+            "Original-compatible casts or BlackHole summaries were not "
+            "preserved");
 }
 
 void validateFloatingConstants(const SVFIR& graph,
@@ -1056,31 +1103,82 @@ void validateMultiCallerPointerFlow(const SVFIR& graph,
         findValue(graph, "multi_pointer_argument");
     const SVFVar* resultCandidate =
         findValue(graph, "multi_pointer_argument_result");
+    const SVFVar* callerLocalCandidate =
+        findValue(graph, "caller_local_after_shared_callee");
+    const SVFVar* callerLocalResultCandidate =
+        findValue(graph, "caller_local_result");
+    const SVFVar* callerSlotCandidate = findValue(graph, "caller_slot");
     if (!pointerCandidate && !resultCandidate)
         return;
     const auto* pointer =
         pointerCandidate ? SVFUtil::dyn_cast<ValVar>(pointerCandidate) : nullptr;
     const auto* result =
         resultCandidate ? SVFUtil::dyn_cast<ValVar>(resultCandidate) : nullptr;
-    if (!pointer || !result)
+    const auto* callerLocal = callerLocalCandidate
+                              ? SVFUtil::dyn_cast<ValVar>(callerLocalCandidate)
+                              : nullptr;
+    const auto* callerLocalResult = callerLocalResultCandidate
+                                    ? SVFUtil::dyn_cast<ValVar>(callerLocalResultCandidate)
+                                    : nullptr;
+    const auto* callerSlot = callerSlotCandidate
+                             ? SVFUtil::dyn_cast<ValVar>(callerSlotCandidate)
+                             : nullptr;
+    if (!pointer || !result || !callerLocal || !callerLocalResult ||
+            !callerSlot)
         throw std::runtime_error("multi-caller pointer fixture is incomplete");
 
     bool observedJoinedPointer = false;
     bool observedJoinedResult = false;
+    bool observedCallerLocal = false;
+    bool observedCallerLocalResult = false;
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
     {
         const AD::AddressSet addresses = analysis.getAddressSet(pointer, node);
-        observedJoinedPointer |= !addresses.isTop() && addresses.size() == 2;
+        observedJoinedPointer |= addresses.isFinite() &&
+                                 addresses.size() == 2;
         observedJoinedResult |=
             hasFiniteBounds(analysis.getInterval(result, node), 7, 11);
+        const AD::AddressSet localAddresses =
+            analysis.getAddressSet(callerLocal, node);
+        observedCallerLocal |= localAddresses.isSingleton() &&
+                               !localAddresses.contains(AD::Location::null());
+        observedCallerLocalResult |= hasFiniteBounds(
+                                         analysis.getInterval(callerLocalResult, node), 7, 7);
     }
-    if (!observedJoinedPointer || !observedJoinedResult)
+    const bool sparseCarrier = analysis.getScalarAbstractState() != nullptr;
+    if (!observedJoinedPointer || !observedJoinedResult ||
+            (sparseCarrier &&
+             (!observedCallerLocal || !observedCallerLocalResult)))
+    {
+        const AD::AddressSet slotTargets =
+            analysis.getAddressSet(callerSlot, callerLocal->getICFGNode());
+        std::string slotMemory = "n/a";
+        std::string lifetime = "n/a";
+        if (slotTargets.isSingleton())
+        {
+            slotMemory = analysis.getMemoryAddressSet(
+                             *slotTargets.begin(), callerLocal->getICFGNode()).toString();
+            lifetime = analysis.isFreedMemory(
+                           *slotTargets.begin(), callerLocal->getICFGNode())
+                       ? "freed" : "not-freed";
+        }
         throw std::runtime_error(
-            "multi-caller pointer argument did not join both call sites");
+            "multi-caller flow lost a joined argument or caller-local memory: "
+            "joined-pointer=" + std::to_string(observedJoinedPointer) +
+            ", joined-result=" + std::to_string(observedJoinedResult) +
+            ", local-pointer=" +
+            analysis.getAddressSet(callerLocal,
+                                   callerLocal->getICFGNode()).toString() +
+            ", local-result=" +
+            analysis.getInterval(callerLocalResult,
+                                 callerLocalResult->getICFGNode()).toString() +
+            ", slot-targets=" + slotTargets.toString() +
+            ", slot-memory=" + slotMemory + ", lifetime=" + lifetime);
+    }
 }
 
-void validateUnknownCallerPointerFlow(const SVFIR& graph,
-                                      AbstractInterpretation& analysis)
+void validateIgnoredIntegerCallerPointerFlow(const SVFIR& graph,
+        AbstractInterpretation& analysis)
 {
     const SVFVar* pointerCandidate =
         findValue(graph, "unknown_pointer_argument");
@@ -1095,17 +1193,97 @@ void validateUnknownCallerPointerFlow(const SVFIR& graph,
     if (!pointer || !result)
         throw std::runtime_error("unknown-caller pointer fixture is incomplete");
 
-    bool observedUnknownPointer = false;
-    bool observedUnknownResult = false;
+    bool observedKnownPointer = false;
+    bool observedKnownResult = false;
     for (const ICFGNode* node : analysis.getAnalyzedNodes())
     {
-        observedUnknownPointer |=
-            analysis.getAddressSet(pointer, node).isTop();
-        observedUnknownResult |= analysis.getInterval(result, node).isTop();
+        const AD::AddressSet addresses = analysis.getAddressSet(pointer, node);
+        observedKnownPointer |= addresses.isSingleton() &&
+                                !addresses.contains(AD::Location::null());
+        observedKnownResult |=
+            hasFiniteBounds(analysis.getInterval(result, node), 7, 7);
     }
-    if (!observedUnknownPointer || !observedUnknownResult)
+    if (!observedKnownPointer || !observedKnownResult)
         throw std::runtime_error(
-            "known and unknown callers did not conservatively join to Top");
+            "ignored integer-derived flow erased the known pointer caller");
+}
+
+void validateAddressStoreAndUninitializedFlow(
+    const SVFIR& graph, AbstractInterpretation& analysis)
+{
+    const SVFVar* leftCandidate = findValue(graph, "weak_left_result");
+    const SVFVar* rightCandidate = findValue(graph, "weak_right_result");
+    const SVFVar* cellCandidate = findValue(graph, "untyped_cell");
+    const SVFVar* typePunnedCandidate =
+        findValue(graph, "type_punned_pointer_result");
+    const SVFVar* emptyLoadCandidate =
+        findValue(graph, "empty_load_result");
+    const SVFVar* emptyNonnullCandidate =
+        findValue(graph, "empty_nonnull");
+    if (!leftCandidate && !rightCandidate)
+        return;
+    const auto* left =
+        leftCandidate ? SVFUtil::dyn_cast<ValVar>(leftCandidate) : nullptr;
+    const auto* right =
+        rightCandidate ? SVFUtil::dyn_cast<ValVar>(rightCandidate) : nullptr;
+    const auto* cell =
+        cellCandidate ? SVFUtil::dyn_cast<ValVar>(cellCandidate) : nullptr;
+    const auto* typePunned =
+        typePunnedCandidate
+        ? SVFUtil::dyn_cast<ValVar>(typePunnedCandidate)
+        : nullptr;
+    const auto* emptyLoad =
+        emptyLoadCandidate
+        ? SVFUtil::dyn_cast<ValVar>(emptyLoadCandidate)
+        : nullptr;
+    const auto* emptyNonnull =
+        emptyNonnullCandidate
+        ? SVFUtil::dyn_cast<ValVar>(emptyNonnullCandidate)
+        : nullptr;
+    if (!left || !right || !cell || !typePunned || !emptyLoad ||
+            !emptyNonnull)
+        throw std::runtime_error("weak-pointer-store fixture is incomplete");
+
+    const AD::AddressSet leftAddresses =
+        analysis.getAddressSet(left, left->getICFGNode());
+    const AD::AddressSet rightAddresses =
+        analysis.getAddressSet(right, right->getICFGNode());
+    const bool observedLeftWeakUpdate = leftAddresses.isFinite() &&
+                                        leftAddresses.size() == 2 &&
+                                        leftAddresses.contains(
+                                            AD::Location::null());
+    const bool observedRightWeakUpdate = rightAddresses.isFinite() &&
+                                         rightAddresses.size() == 2 &&
+                                         rightAddresses.contains(
+                                                 AD::Location::null());
+    const AD::AddressSet emptyAddresses =
+        analysis.getAddressSet(emptyLoad, emptyLoad->getICFGNode());
+    const bool observedEmptyLoad = emptyAddresses.isBottom();
+    bool observedTypePunnedObject = false;
+    for (const ICFGNode* node : analysis.getAnalyzedNodes())
+    {
+        const AD::AddressSet cells = analysis.getAddressSet(cell, node);
+        const AD::AddressSet typePunnedAddresses =
+            analysis.getAddressSet(typePunned, node);
+        if (cells.isSingleton() && !cells.contains(AD::Location::null()) &&
+                typePunnedAddresses.isSingleton())
+        {
+            const ObjVar* object = analysis.objectAt(*cells.begin());
+            observedTypePunnedObject |= object &&
+                                        analysis.hasAbsValue(object, node);
+        }
+    }
+    if (!observedLeftWeakUpdate || !observedRightWeakUpdate ||
+            !observedTypePunnedObject || !observedEmptyLoad)
+        throw std::runtime_error(
+            "weak store, type-punned store, or empty uninitialized load failed: "
+            "left=" + leftAddresses.toString() +
+            ", right=" + rightAddresses.toString() +
+            ", type-punned=" +
+            (observedTypePunnedObject ? std::string("yes") : "no") +
+            ", empty=" +
+            analysis.getAddressSet(emptyLoad,
+                                   emptyLoad->getICFGNode()).toString());
 }
 
 void validatePointerOrderingFlow(const SVFIR& graph,
@@ -1224,6 +1402,26 @@ void validateNegativeGepFlow(const SVFIR& graph,
         throw std::runtime_error(
             "signed negative GEP offset was clamped or mis-normalized");
 }
+
+void validateExplicitTopMerge(const SVFIR& graph,
+                              AbstractInterpretation& analysis)
+{
+    const SVFVar* mergeCandidate =
+        findValue(graph, "sparse_top_merge_result");
+    const SVFVar* loopCandidate =
+        findValue(graph, "sparse_top_loop_result");
+    if (!mergeCandidate && !loopCandidate)
+        return;
+    const auto* mergeResult = SVFUtil::dyn_cast<ValVar>(mergeCandidate);
+    const auto* loopResult = SVFUtil::dyn_cast<ValVar>(loopCandidate);
+    if (!mergeResult || !loopResult ||
+            !analysis.getInterval(mergeResult,
+                                  mergeResult->getICFGNode()).isTop() ||
+            !analysis.getInterval(loopResult,
+                                  loopResult->getICFGNode()).isTop())
+        throw std::runtime_error(
+            "an explicit Top memory write was lost at a flow merge or loop");
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -1252,13 +1450,15 @@ int main(int argc, char** argv)
             validateVariableIdLayout(*graph);
         validateProjection(*graph, analysis);
         validateSparseMemoryRefinement(*graph, analysis);
-        validateConservativeUnknownCasts(*graph, analysis);
+        validateAddressKinds(*graph, analysis);
         validateFloatingConstants(*graph, analysis);
         validatePointerArgumentFlow(*graph, analysis);
         validateMultiCallerPointerFlow(*graph, analysis);
-        validateUnknownCallerPointerFlow(*graph, analysis);
+        validateIgnoredIntegerCallerPointerFlow(*graph, analysis);
+        validateAddressStoreAndUninitializedFlow(*graph, analysis);
         validatePointerOrderingFlow(*graph, analysis);
         validateNegativeGepFlow(*graph, analysis);
+        validateExplicitTopMerge(*graph, analysis);
 
         std::cout << "AE_GENERIC_OBSERVATION analyzed_nodes="
                   << analysis.getAnalyzedNodes().size() << '\n';

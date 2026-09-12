@@ -170,7 +170,7 @@ void AbsExtAPI::initExtFunMap()
                 const LoadStmt* load = SVFUtil::cast<LoadStmt>(stmt);
                 const AD::AddressSet ptrVal =
                     ae->getAddressSet(load->getRHSVar(), callNode);
-                if (ptrVal.isTop())
+                if (ptrVal.hasUnknownObject())
                     continue;
                 for (AD::Location location : ptrVal)
                     ae->updateMemoryValue(location, num,
@@ -289,7 +289,7 @@ void AbsExtAPI::initExtFunMap()
             return;
         const AD::AddressSet ptrVal =
             ae->getAddressSet(callNode->getArgument(0), callNode);
-        if (ptrVal.isTop())
+        if (ptrVal.hasUnknownObject())
             return;
         for (AD::Location location : ptrVal)
         {
@@ -383,8 +383,8 @@ std::string AbsExtAPI::strRead(const ValVar* rhs, const ICFGNode* node)
     {
         const AD::AddressSet expression =
             ae->getGepObjAddrs(rhs, integerInterval(index), node);
-        if (expression.isBottom() || expression.isTop())
-            continue;
+        if (!expression.isFinite() || expression.isBottom())
+            break;
         AD::Interval value = AD::Interval::bottom();
         for (AD::Location location : expression)
         {
@@ -431,10 +431,12 @@ void AbsExtAPI::handleExtAPI(const CallICFGNode* call)
         {
             if (const SVFVar* ret = call->getRetICFGNode()->getActualRet())
             {
-                if (ae->getAddressSet(ret, call).isBottom())
-                {
+                // Pointer returns retain the address fact established by the
+                // SVF call/value-flow edges (commonly the BlackHole summary
+                // object). This matches Original AE's policy and avoids
+                // replacing a useful points-to fact with object-top.
+                if (!ret->isPointer())
                     ae->updateInterval(ret, AD::Interval::top(), call);
-                }
             }
             return;
         }
@@ -510,7 +512,7 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
     // Step 1: determine the buffer size (in bytes) backing this pointer
     u32_t dst_size = 0;
     const AD::AddressSet ptrVal = ae->getAddressSet(strValue, node);
-    if (!ptrVal.isTop())
+    if (!ptrVal.hasUnknownObject())
         for (AD::Location location : ptrVal)
         {
             const ObjVar* object = ae->objectAt(location);
@@ -549,14 +551,14 @@ AD::Interval AbsExtAPI::getStrlen(const ValVar* strValue, const ICFGNode* node)
     // Unknown preceding elements do not invalidate a later definite
     // terminator: they only weaken the result from an exact length to an upper
     // bound because the string may terminate earlier.
-    if (!ptrVal.isBottom() && !ptrVal.isTop() && dst_size != 0)
+    if (!ptrVal.isBottom() && ptrVal.isFinite() && dst_size != 0)
     {
         bool exactPrefix = true;
         for (u32_t index = 0; index < dst_size; index++)
         {
             const AD::AddressSet expression =
                 ae->getGepObjAddrs(strValue, integerInterval(index), node);
-            if (expression.isTop())
+            if (!expression.isFinite())
                 return AD::Interval::closed(
                            AD::Rational(0), AD::Rational(Options::MaxFieldLimit()));
             AD::Interval value = AD::Interval::bottom();
@@ -647,7 +649,7 @@ void AbsExtAPI::handleMemcpy(const ValVar* dst, const ValVar* src,
             ae->getGepObjAddrs(src, integerInterval(index), node);
         const AD::AddressSet exprDst =
             ae->getGepObjAddrs(dst, integerInterval(index + start_idx), node);
-        if (exprSrc.isTop() || exprDst.isTop())
+        if (!exprSrc.isFinite() || !exprDst.isFinite())
             return;
         for (AD::Location dstLocation : exprDst)
         {
@@ -698,7 +700,7 @@ void AbsExtAPI::handleMemset(const ValVar* dst, const AD::Interval& elem,
             break;
         const AD::AddressSet locations =
             ae->getGepObjAddrs(dst, integerInterval(index), node);
-        if (locations.isTop())
+        if (!locations.isFinite())
             break;
         for (AD::Location location : locations)
         {

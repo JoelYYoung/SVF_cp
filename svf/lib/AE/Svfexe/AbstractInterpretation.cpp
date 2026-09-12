@@ -59,6 +59,15 @@ static std::vector<const ICFGEdge*> orderedIncomingEdges(const ICFGNode* node)
     return edges;
 }
 
+AD::AddressSet AbstractInterpretation::blackHoleAddressSet() const
+{
+    const auto* object = SVFUtil::dyn_cast<ObjVar>(
+                             svfir->getGNode(IRGraph::BlackHole));
+    if (!object)
+        throw std::runtime_error("SVFIR has no BlackHole object");
+    return AD::AddressSet::singleton(adapter_.location(*object));
+}
+
 void AbstractInterpretation::handleGlobalNode()
 {
     const ICFGNode* node = icfg->getGlobalICFGNode();
@@ -68,7 +77,8 @@ void AbstractInterpretation::handleGlobalNode()
 
     if (const auto* variable = SVFUtil::dyn_cast<ValVar>(
                                    svfir->getGNode(PAG::getPAG()->getBlkPtr())))
-        updateValue(variable, AD::Interval::top(), AD::AddressSet::top(), node);
+        updateValue(variable, AD::Interval::top(),
+                    blackHoleAddressSet(), node);
 }
 
 void AbstractInterpretation::initializeObjectValue(
@@ -81,6 +91,11 @@ void AbstractInterpretation::initializeObjectValue(
     denseState.allocate(adapter_.location(*object));
 
     const BaseObjVar* base = PAG::getPAG()->getBaseObject(object->getId());
+    if (base->isBlackHoleObj())
+    {
+        addresses = blackHoleAddressSet();
+        return;
+    }
     if (base->isConstDataOrConstGlobal() || base->isConstantArray() ||
             base->isConstantStruct())
     {
@@ -110,6 +125,16 @@ void AbstractInterpretation::runOnModule()
     utils->collectCheckPoint();
 
     analyse();
+    if (unknownTargetTelemetryEnabled_)
+    {
+        const UnknownTargetTelemetry& telemetry = unknownTargetTelemetry_;
+        SVFUtil::outs()
+                << "AE_UNKNOWN_TARGET_STATS loads=" << telemetry.loads
+                << " stores=" << telemetry.stores
+                << " store_cells_visited=" << telemetry.storeCellsVisited
+                << " sparse_definition_cells_visited="
+                << telemetry.sparseDefinitionCellsVisited << '\n';
+    }
     utils->checkPointAllSet();
     stat->endClk();
     stat->finializeStat();
@@ -119,7 +144,10 @@ void AbstractInterpretation::runOnModule()
         detector->reportBug();
 }
 
-AbstractInterpretation::AbstractInterpretation() : adapter_(*PAG::getPAG())
+AbstractInterpretation::AbstractInterpretation()
+    : adapter_(*PAG::getPAG()),
+      unknownTargetTelemetryEnabled_(
+          std::getenv("SVF_AE_UNKNOWN_TARGET_STATS") != nullptr)
 {
     stat = new AEStat(this);
     // Run Andersen's pointer analysis and build WTO
@@ -548,7 +576,8 @@ void AbstractInterpretation::collectBranchRefinement(
                             const ICFGNode* loadIcfg = load->getICFGNode();
                             const AD::AddressSet ptrVal =
                                 getAddressSet(load->getRHSVar(), loadIcfg);
-                            if (ptrVal.isBottom() || ptrVal.isTop())
+                            if (ptrVal.isBottom() ||
+                                    ptrVal.hasUnknownObject())
                             {
                                 // Cannot map load p back to concrete ObjVars.
                             }
@@ -597,7 +626,7 @@ void AbstractInterpretation::collectBranchRefinement(
                     const ICFGNode* loadIcfg = load->getICFGNode();
                     const AD::AddressSet ptrVal =
                         getAddressSet(load->getRHSVar(), loadIcfg);
-                    if (ptrVal.isBottom() || ptrVal.isTop())
+                    if (ptrVal.isBottom() || ptrVal.hasUnknownObject())
                     {
                         // Cannot map load p back to concrete ObjVars.
                     }
@@ -801,7 +830,7 @@ const FunObjVar* AbstractInterpretation::getCallee(const CallICFGNode* callNode)
 
     const AD::AddressSet addresses =
         getAddressSet(svfir->getSVFVar(call_id), callNode);
-    if (addresses.isBottom() || addresses.isTop() || addresses.empty())
+    if (!addresses.isFinite() || addresses.empty())
         return nullptr;
 
     const ObjVar* object = objectAt(*addresses.begin());
@@ -1033,7 +1062,8 @@ void AbstractInterpretation::updateStateOnPhi(const PhiStmt* phi)
             if (feasible)
             {
                 interval.joinWith(getInterval(phi->getOpVar(i), opICFGNode));
-                addresses.joinWith(getAddressSet(phi->getOpVar(i), opICFGNode));
+                addresses.joinWith(getAddressSet(phi->getOpVar(i),
+                                                 opICFGNode));
             }
         }
     }
@@ -1055,7 +1085,8 @@ void AbstractInterpretation::updateStateOnCall(const CallPE* callPE)
         if (hasAbsState(opICFGNode))
         {
             interval.joinWith(getInterval(callPE->getOpVar(i), opICFGNode));
-            addresses.joinWith(getAddressSet(callPE->getOpVar(i), opICFGNode));
+            addresses.joinWith(getAddressSet(callPE->getOpVar(i),
+                                             opICFGNode));
         }
     }
     updateValue(res, interval, addresses, node);
@@ -1071,10 +1102,10 @@ void AbstractInterpretation::updateStateOnRet(const RetPE* retPE)
 void AbstractInterpretation::updateStateOnAddr(const AddrStmt* addr)
 {
     const ICFGNode* node = addr->getICFGNode();
+    const auto* object = SVFUtil::cast<ObjVar>(addr->getRHSVar());
     AD::Interval interval = AD::Interval::bottom();
     AD::AddressSet addresses = AD::AddressSet::bottom();
-    initializeObjectValue(SVFUtil::cast<ObjVar>(addr->getRHSVar()), interval,
-                          addresses, node);
+    initializeObjectValue(object, interval, addresses, node);
     if (addr->getRHSVar()->getType()->getKind() == SVFType::SVFIntegerTy)
         interval.meetWith(
             utils->getRangeLimitFromType(addr->getRHSVar()->getType()));
@@ -1167,12 +1198,28 @@ void AbstractInterpretation::updateStateOnCmp(const CmpStmt* cmp)
     }
     else if (addressComparison)
     {
-        const bool exact = !lhsAddresses.isTop() && !rhsAddresses.isTop() &&
-                           lhsAddresses.isSingleton() &&
-                           rhsAddresses.isSingleton();
-        const bool disjoint = !lhsAddresses.isTop() && !rhsAddresses.isTop() &&
+        const auto containsBlackHole = [&](const AD::AddressSet& addresses)
+        {
+            if (!addresses.isFinite())
+                return true;
+            return std::any_of(addresses.begin(), addresses.end(),
+                               [&](AD::Location location)
+            {
+                const ObjVar* object = objectAt(location);
+                const BaseObjVar* base = object
+                                         ? svfir->getBaseObject(object->getId()) : nullptr;
+                return base && base->isBlackHoleObj();
+            });
+        };
+        const bool unknownAddress = containsBlackHole(lhsAddresses) ||
+                                    containsBlackHole(rhsAddresses);
+        const bool exact = lhsAddresses.isSingleton() &&
+                           rhsAddresses.isSingleton() && !unknownAddress;
+        const bool disjoint = lhsAddresses.isFinite() &&
+                              rhsAddresses.isFinite() &&
                               !lhsAddresses.isBottom() &&
                               !rhsAddresses.isBottom() &&
+                              !unknownAddress &&
                               !lhsAddresses.hasIntersection(rhsAddresses);
         switch (predicate)
         {
@@ -1449,14 +1496,12 @@ void AbstractInterpretation::updateStateOnCopy(const CopyStmt* copy)
     }
     else if (copy->getCopyKind() == CopyStmt::INTTOPTR)
     {
-        // Without an integer-to-location provenance map, only zero has a
-        // precise portable pointer interpretation. Every other integer range
-        // may denote any address and must conservatively become address Top.
-        const AD::AddressSet converted =
-            rhsInterval.isZero()
-            ? AD::AddressSet::singleton(AD::Location::null())
-            : AD::AddressSet::top();
-        updateValue(lhsVar, AD::Interval::bottom(), converted, node);
+        // Match Original AE's transfer policy: integer-derived addresses do
+        // not enter modeled pointer value-flow. AddressSet can express raw
+        // addresses, but this interpreter deliberately leaves the address
+        // component empty.
+        updateValue(lhsVar, AD::Interval::bottom(),
+                    AD::AddressSet::bottom(), node);
     }
     else if (copy->getCopyKind() == CopyStmt::PTRTOINT)
     {

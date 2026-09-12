@@ -32,7 +32,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -189,6 +188,14 @@ public:
         return memoryLayout_;
     }
 
+    /// Restore only facets which are physically absent (semantic Top) from a
+    /// caller frame after a context-insensitive shared callee. Ordinary
+    /// lattice joins keep their total-state semantics.
+    void restoreMissingMemoryFrom(const BoxAddressDomain& caller,
+                                  Variable content);
+    void restoreMissingAddressFrom(const BoxAddressDomain& caller,
+                                   Variable content);
+
     void assignPointer(Variable target, const AddressSet& value)
     {
         addresses_.assign(target, value);
@@ -227,10 +234,10 @@ public:
     void load(Variable target, Variable pointer)
     {
         const AddressSet pointees = addresses_.addressSet(pointer);
-        if (pointees.isTop() || pointees.isBottom())
+        if (pointees.hasUnknownObject() || pointees.isBottom())
         {
             numerical_.forget(target);
-            if (pointees.isTop())
+            if (pointees.hasUnknownObject())
                 addresses_.forget(target);
             else
                 addresses_.assign(target, AddressSet::bottom());
@@ -269,32 +276,18 @@ public:
         }
     }
 
-    void store(Variable pointer, Variable source)
+    /// Overwrite one interpreter-selected memory target.
+    void assignMemory(Location location, Variable source)
     {
-        const AddressSet pointees = addresses_.addressSet(pointer);
-        if (pointees.isTop())
-        {
-            for (const auto& [location, content] : memoryLayout_.cells())
-            {
-                (void)location;
-                weakStore(content, source);
-            }
-            return;
-        }
-        if (pointees.isBottom())
-            return;
-        if (pointees.isSingleton())
-        {
-            const Location location = *pointees.locations().begin();
-            if (memoryLayout_.contains(location))
-                strongStore(memoryLayout_.contentOf(location), source);
-            return;
-        }
-        for (Location location : pointees.locations())
-        {
-            if (memoryLayout_.contains(location))
-                weakStore(memoryLayout_.contentOf(location), source);
-        }
+        if (memoryLayout_.contains(location))
+            strongStore(memoryLayout_.contentOf(location), source);
+    }
+
+    /// Join into one interpreter-selected memory target.
+    void joinMemory(Location location, Variable source)
+    {
+        if (memoryLayout_.contains(location))
+            weakStore(memoryLayout_.contentOf(location), source);
     }
 
     void allocate(Location location)
@@ -305,7 +298,7 @@ public:
     void release(Variable pointer)
     {
         const AddressSet pointees = addresses_.addressSet(pointer);
-        if (pointees.isTop())
+        if (pointees.hasUnknownObject())
         {
             for (const auto& [location, content] : memoryLayout_.cells())
             {
