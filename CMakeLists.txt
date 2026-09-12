@@ -300,6 +300,37 @@ install(TARGETS SvfFlags EXPORT SVFTargets)
 if(EXISTS "${SVF_SOURCE_DIR}/Test-Suite/CMakeLists.txt")
   enable_testing()
   add_subdirectory(Test-Suite)
+
+  # Keep the external Test-Suite compatible with this branch's AE surface.
+  # Its symabs/aetest entries invoke legacy command-line self-tests that were
+  # removed with RelExeState.  The supported domain and AE behavior is covered
+  # by the in-tree tests registered below.
+  configure_file(
+    cmake/CTestCustom.cmake.in
+    "${SVF_BINARY_DIR}/CTestCustom.cmake"
+    @ONLY
+  )
+
+  # The write/read differential tests produce fixed-name graph files in a
+  # shared working directory.  CMake 3.28 added the cross-directory operation
+  # needed to make an unrestricted `ctest -j` safe without modifying the
+  # separately maintained Test-Suite repository.
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    get_property(
+      SVF_EXTERNAL_TESTS
+      DIRECTORY "${SVF_SOURCE_DIR}/Test-Suite"
+      PROPERTY TESTS
+    )
+    foreach(test_name IN LISTS SVF_EXTERNAL_TESTS)
+      if(test_name MATCHES "^diff_tests-wr-ander/")
+        set_tests_properties(
+          "${test_name}"
+          DIRECTORY "${SVF_SOURCE_DIR}/Test-Suite"
+          PROPERTIES RUN_SERIAL TRUE
+        )
+      endif()
+    endforeach()
+  endif()
 endif()
 
 # =================================================================================
