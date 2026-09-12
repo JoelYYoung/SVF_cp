@@ -302,9 +302,9 @@ if(EXISTS "${SVF_SOURCE_DIR}/Test-Suite/CMakeLists.txt")
   add_subdirectory(Test-Suite)
 
   # Keep the external Test-Suite compatible with this branch's AE surface.
-  # Its symabs/aetest entries invoke legacy command-line self-tests that were
-  # removed with RelExeState.  The supported domain and AE behavior is covered
-  # by the in-tree tests registered below.
+  # Its symabs/aetest entries invoke legacy command-line self-tests for the
+  # removed IntervalState and RelationSolver surface. The supported domain and
+  # AE behavior is covered by the in-tree tests registered below.
   configure_file(
     cmake/CTestCustom.cmake.in
     "${SVF_BINARY_DIR}/CTestCustom.cmake"

@@ -1,4 +1,4 @@
 # The external Test-Suite still registers command-line self-tests for the
-# legacy relational execution state.  This branch tests its replacement with
-# svf-core-domain-test and the box-* AE integration tests instead.
+# removed IntervalState and RelationSolver surface. This branch tests the
+# supported domain and AE behavior with in-tree tests instead.
 set(CTEST_CUSTOM_TESTS_IGNORE symabs aetest)

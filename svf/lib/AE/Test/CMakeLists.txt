@@ -30,6 +30,12 @@ add_executable(svf-core-domain-test CoreDomainTest.cpp)
 target_link_libraries(svf-core-domain-test PRIVATE AbstractDomainCore)
 add_test(NAME core-domain COMMAND svf-core-domain-test)
 
+if(TARGET SvfCore)
+  add_executable(svf-rel-exe-state-test RelExeStateTest.cpp)
+  target_link_libraries(svf-rel-exe-state-test PRIVATE SvfCore)
+  add_test(NAME rel-exe-state COMMAND svf-rel-exe-state-test)
+endif()
+
 if(TARGET SvfLLVM)
   add_executable(svf-box-ae-integration-test BoxAEIntegrationTest.cpp)
   target_link_libraries(svf-box-ae-integration-test PRIVATE SvfLLVM)
@@ -140,19 +146,22 @@ if(APPLE AND TARGET z3::libz3)
   get_filename_component(
     Z3_TEST_LIBRARY_DIRECTORY "${Z3_TEST_LIBRARY}" DIRECTORY
   )
-  set(box_test_targets svf-core-domain-test)
-  if(TARGET svf-box-ae-integration-test)
-    list(APPEND box_test_targets svf-box-ae-integration-test)
+  set(ae_test_targets svf-core-domain-test)
+  if(TARGET svf-rel-exe-state-test)
+    list(APPEND ae_test_targets svf-rel-exe-state-test)
   endif()
-  foreach(box_test_target IN LISTS box_test_targets)
+  if(TARGET svf-box-ae-integration-test)
+    list(APPEND ae_test_targets svf-box-ae-integration-test)
+  endif()
+  foreach(ae_test_target IN LISTS ae_test_targets)
     set_property(
-      TARGET ${box_test_target} APPEND
+      TARGET ${ae_test_target} APPEND
       PROPERTY BUILD_RPATH "${Z3_TEST_LIBRARY_DIRECTORY}"
     )
     add_custom_command(
-      TARGET ${box_test_target} POST_BUILD
+      TARGET ${ae_test_target} POST_BUILD
       COMMAND install_name_tool -change libz3.dylib @rpath/libz3.dylib
-              "$<TARGET_FILE:${box_test_target}>"
+              "$<TARGET_FILE:${ae_test_target}>"
       VERBATIM
     )
   endforeach()
