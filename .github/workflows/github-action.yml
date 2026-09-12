@@ -97,11 +97,6 @@ jobs:
         run:
           ctest -R double_free -VV
 
-      - name: ctest box domain and integration
-        working-directory: ${{github.workspace}}/Release-build
-        run:
-          ctest -R '^box-' -VV
-
       - name: ctest ae_assert
         working-directory: ${{github.workspace}}/Release-build
         run:

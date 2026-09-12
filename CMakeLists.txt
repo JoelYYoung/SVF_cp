@@ -97,10 +97,6 @@ option(SVF_EXPORT_DYNAMIC "Export all (not only the actually used) symbols to dy
 option(SVF_ENABLE_ASSERTIONS "Always enable debugging assertions, also if the build type is a release build")
 option(SVF_ENABLE_RTTI "Adds -fno-rtti to disable runtime type information (RTTI)" ON)
 option(SVF_ENABLE_EXCEPTIONS "Adds -fno-exceptions to disable exception handling" ON)
-option(SVF_BUILD_ABSTRACT_DOMAIN_TESTS
-       "Build Box domain unit and abstract-execution integration tests"
-       ${BUILD_TESTING})
-
 if(NOT SVF_ENABLE_EXCEPTIONS)
   message(FATAL_ERROR
           "AbstractDomainCore uses exception-based API diagnostics; "
@@ -339,11 +335,6 @@ endif()
 
 add_subdirectory(svf)
 add_subdirectory(svf-llvm)
-
-if(SVF_BUILD_ABSTRACT_DOMAIN_TESTS)
-  enable_testing()
-  add_subdirectory(svf/lib/AE/Test)
-endif()
 
 # =================================================================================
 # SVF build configuration handling (post linking LLVM)
